@@ -1,0 +1,31 @@
+# Local agent and generated analysis state
+.agents/
+.codex/
+graphify-out/
+
+# Secrets and local environments
+.env
+.env.*
+!.env.example
+.venv/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend dependencies and build output
+node_modules/
+.svelte-kit/
+build/
+
+# Local crawler/runtime artifacts
+storage/
+*.log
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
