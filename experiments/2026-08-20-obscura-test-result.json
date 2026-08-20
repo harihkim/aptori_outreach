@@ -1,0 +1,210 @@
+{
+  "run_id": "cli_bench_1787220282",
+  "timestamp": "2026-08-20T10:04:42Z",
+  "binaries": {
+    "standard_path": "/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/obscura",
+    "standard_sha256": "dbd8fd5147c1aeff30165c9d7884e777bcd630493bd83e20148fa57c71e91d94",
+    "stealth_path": "/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/stealth/obscura",
+    "stealth_sha256": "bde140f54b90bf064335a017780ae1d3bd33f69ccdbc7f954a63b5f43db7c723"
+  },
+  "tests": [
+    {
+      "test_name": "known_thread_modern_reddit",
+      "url": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/",
+      "type": "thread",
+      "standard": {
+        "latency_seconds": 7.405,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 14255,
+          "has_title": true,
+          "has_body": true,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 3
+        }
+      },
+      "stealth": {
+        "latency_seconds": 9.784,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 14214,
+          "has_title": true,
+          "has_body": true,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 3
+        }
+      }
+    },
+    {
+      "test_name": "known_thread_old_reddit",
+      "url": "https://old.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/",
+      "type": "thread",
+      "standard": {
+        "latency_seconds": 5.521,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 1465,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 0
+        }
+      },
+      "stealth": {
+        "latency_seconds": 4.16,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 1465,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 0
+        }
+      }
+    },
+    {
+      "test_name": "known_thread_json",
+      "url": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken.json",
+      "type": "json",
+      "standard": {
+        "latency_seconds": 0.63,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 87784,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 2
+        }
+      },
+      "stealth": {
+        "latency_seconds": 0.613,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 87784,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 2
+        }
+      }
+    },
+    {
+      "test_name": "subreddit_listing_modern",
+      "url": "https://www.reddit.com/r/cybersecurity/",
+      "type": "listing",
+      "standard": {
+        "latency_seconds": 0.819,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 22,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 0
+        }
+      },
+      "stealth": {
+        "latency_seconds": 10.927,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 24682,
+          "has_title": true,
+          "has_body": true,
+          "has_comments": false,
+          "extracted_links_count": 3,
+          "completeness_level": 3
+        }
+      }
+    },
+    {
+      "test_name": "subreddit_listing_old",
+      "url": "https://old.reddit.com/r/cybersecurity/",
+      "type": "listing",
+      "standard": {
+        "latency_seconds": 6.542,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 1465,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 1
+        }
+      },
+      "stealth": {
+        "latency_seconds": 2.954,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 1465,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 1
+        }
+      }
+    },
+    {
+      "test_name": "reddit_search_query",
+      "url": "https://www.reddit.com/r/cybersecurity/search/?q=API+security&restrict_sr=1",
+      "type": "search",
+      "standard": {
+        "latency_seconds": 9.363,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 12293,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 1
+        }
+      },
+      "stealth": {
+        "latency_seconds": 7.01,
+        "returncode": 0,
+        "analysis": {
+          "bot_block": false,
+          "block_reason": null,
+          "content_length_chars": 12302,
+          "has_title": false,
+          "has_body": false,
+          "has_comments": false,
+          "extracted_links_count": 0,
+          "completeness_level": 1
+        }
+      }
+    }
+  ]
+}

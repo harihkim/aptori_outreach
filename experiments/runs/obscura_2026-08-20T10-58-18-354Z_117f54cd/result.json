@@ -1,0 +1,754 @@
+{
+  "schemaVersion": 1,
+  "runId": "obscura_2026-08-20T10-58-18-354Z_117f54cd",
+  "startedAt": "2026-08-20T10:58:18.396Z",
+  "completedAt": "2026-08-20T10:58:39.491Z",
+  "elapsedSeconds": 21.09,
+  "accessMode": "obscura_cdp_standard_anonymous",
+  "targetUrl": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/",
+  "finalUrl": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/",
+  "structuredEndpoint": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken.json?limit=500&raw_json=1&sort=confidence",
+  "navigationStatus": 200,
+  "response": {
+    "status": 200,
+    "statusText": "",
+    "contentType": "application/json; charset=UTF-8",
+    "bytes": 73409,
+    "sha256": "02db600eee3fa3ee6f82e3c5784fd0a9ce52e9f4cd4b12be7416315fbddf30ec"
+  },
+  "runtime": {
+    "wslDistro": "Ubuntu",
+    "platform": "linux",
+    "architecture": "x64",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "nodeVersion": "v20.18.0",
+    "playwrightCoreVersion": "1.62.1",
+    "obscuraBinary": "/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/obscura",
+    "obscuraBinarySha256": "dbd8fd5147c1aeff30165c9d7884e777bcd630493bd83e20148fa57c71e91d94",
+    "obscuraArguments": [
+      "serve",
+      "--port",
+      "9234",
+      "--allow-private-network"
+    ]
+  },
+  "memoryProfile": {
+    "sampleIntervalMs": 250,
+    "sampleCount": 84,
+    "obscuraTreePeakRssMB": 233.73,
+    "nodePeakRssMB": 124.4,
+    "samples": [
+      {
+        "timestamp": "2026-08-20T10:58:18.380Z",
+        "obscuraTreeRssMB": 4.69,
+        "nodeRssMB": 115.13
+      },
+      {
+        "timestamp": "2026-08-20T10:58:18.655Z",
+        "obscuraTreeRssMB": 23.47,
+        "nodeRssMB": 117.65
+      },
+      {
+        "timestamp": "2026-08-20T10:58:18.914Z",
+        "obscuraTreeRssMB": 27.97,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:19.174Z",
+        "obscuraTreeRssMB": 34.98,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:19.427Z",
+        "obscuraTreeRssMB": 35.81,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:19.682Z",
+        "obscuraTreeRssMB": 35.87,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:19.942Z",
+        "obscuraTreeRssMB": 35.87,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:20.196Z",
+        "obscuraTreeRssMB": 36.21,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:20.455Z",
+        "obscuraTreeRssMB": 36.82,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:20.708Z",
+        "obscuraTreeRssMB": 41.45,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:20.967Z",
+        "obscuraTreeRssMB": 45.02,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:21.225Z",
+        "obscuraTreeRssMB": 46.88,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:21.476Z",
+        "obscuraTreeRssMB": 46.88,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:21.728Z",
+        "obscuraTreeRssMB": 46.88,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:21.980Z",
+        "obscuraTreeRssMB": 46.96,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:22.231Z",
+        "obscuraTreeRssMB": 49.97,
+        "nodeRssMB": 118.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:22.483Z",
+        "obscuraTreeRssMB": 63.35,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:22.733Z",
+        "obscuraTreeRssMB": 80.24,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:22.985Z",
+        "obscuraTreeRssMB": 85.07,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:23.240Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:23.492Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:23.744Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:23.999Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:24.251Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:24.501Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:24.752Z",
+        "obscuraTreeRssMB": 85.45,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:25.002Z",
+        "obscuraTreeRssMB": 86.88,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:25.253Z",
+        "obscuraTreeRssMB": 106.03,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:25.503Z",
+        "obscuraTreeRssMB": 136.56,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:25.753Z",
+        "obscuraTreeRssMB": 138.23,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:26.006Z",
+        "obscuraTreeRssMB": 139.71,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:26.258Z",
+        "obscuraTreeRssMB": 143.56,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:26.518Z",
+        "obscuraTreeRssMB": 143.82,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:26.769Z",
+        "obscuraTreeRssMB": 150.88,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:27.025Z",
+        "obscuraTreeRssMB": 155.3,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:27.278Z",
+        "obscuraTreeRssMB": 155.34,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:27.537Z",
+        "obscuraTreeRssMB": 162.65,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:27.790Z",
+        "obscuraTreeRssMB": 181.79,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:28.052Z",
+        "obscuraTreeRssMB": 181.97,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:28.305Z",
+        "obscuraTreeRssMB": 182.08,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:28.565Z",
+        "obscuraTreeRssMB": 183.66,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:28.819Z",
+        "obscuraTreeRssMB": 183.17,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:29.080Z",
+        "obscuraTreeRssMB": 183.17,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:29.335Z",
+        "obscuraTreeRssMB": 183.17,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:29.595Z",
+        "obscuraTreeRssMB": 190.98,
+        "nodeRssMB": 118.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:29.850Z",
+        "obscuraTreeRssMB": 190.26,
+        "nodeRssMB": 118.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:30.112Z",
+        "obscuraTreeRssMB": 190.26,
+        "nodeRssMB": 118.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:30.367Z",
+        "obscuraTreeRssMB": 190.43,
+        "nodeRssMB": 118.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:30.629Z",
+        "obscuraTreeRssMB": 200.13,
+        "nodeRssMB": 118.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:30.885Z",
+        "obscuraTreeRssMB": 200.28,
+        "nodeRssMB": 118.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:31.145Z",
+        "obscuraTreeRssMB": 200.28,
+        "nodeRssMB": 118.9
+      },
+      {
+        "timestamp": "2026-08-20T10:58:31.401Z",
+        "obscuraTreeRssMB": 192.5,
+        "nodeRssMB": 119.02
+      },
+      {
+        "timestamp": "2026-08-20T10:58:31.657Z",
+        "obscuraTreeRssMB": 206.01,
+        "nodeRssMB": 119.15
+      },
+      {
+        "timestamp": "2026-08-20T10:58:31.908Z",
+        "obscuraTreeRssMB": 208.37,
+        "nodeRssMB": 119.27
+      },
+      {
+        "timestamp": "2026-08-20T10:58:32.159Z",
+        "obscuraTreeRssMB": 208.38,
+        "nodeRssMB": 119.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:32.410Z",
+        "obscuraTreeRssMB": 208.39,
+        "nodeRssMB": 119.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:32.661Z",
+        "obscuraTreeRssMB": 208.73,
+        "nodeRssMB": 119.65
+      },
+      {
+        "timestamp": "2026-08-20T10:58:32.912Z",
+        "obscuraTreeRssMB": 218.4,
+        "nodeRssMB": 119.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:33.163Z",
+        "obscuraTreeRssMB": 218.49,
+        "nodeRssMB": 119.9
+      },
+      {
+        "timestamp": "2026-08-20T10:58:33.413Z",
+        "obscuraTreeRssMB": 218.49,
+        "nodeRssMB": 120.02
+      },
+      {
+        "timestamp": "2026-08-20T10:58:33.663Z",
+        "obscuraTreeRssMB": 218.49,
+        "nodeRssMB": 120.15
+      },
+      {
+        "timestamp": "2026-08-20T10:58:33.914Z",
+        "obscuraTreeRssMB": 224.38,
+        "nodeRssMB": 120.27
+      },
+      {
+        "timestamp": "2026-08-20T10:58:34.164Z",
+        "obscuraTreeRssMB": 224.77,
+        "nodeRssMB": 120.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:34.418Z",
+        "obscuraTreeRssMB": 224.73,
+        "nodeRssMB": 120.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:34.668Z",
+        "obscuraTreeRssMB": 225.05,
+        "nodeRssMB": 120.65
+      },
+      {
+        "timestamp": "2026-08-20T10:58:34.925Z",
+        "obscuraTreeRssMB": 225.05,
+        "nodeRssMB": 120.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:35.184Z",
+        "obscuraTreeRssMB": 225.16,
+        "nodeRssMB": 120.9
+      },
+      {
+        "timestamp": "2026-08-20T10:58:35.441Z",
+        "obscuraTreeRssMB": 225.16,
+        "nodeRssMB": 120.9
+      },
+      {
+        "timestamp": "2026-08-20T10:58:35.696Z",
+        "obscuraTreeRssMB": 225.16,
+        "nodeRssMB": 121.02
+      },
+      {
+        "timestamp": "2026-08-20T10:58:35.955Z",
+        "obscuraTreeRssMB": 226.31,
+        "nodeRssMB": 121.15
+      },
+      {
+        "timestamp": "2026-08-20T10:58:36.211Z",
+        "obscuraTreeRssMB": 226.31,
+        "nodeRssMB": 121.27
+      },
+      {
+        "timestamp": "2026-08-20T10:58:36.465Z",
+        "obscuraTreeRssMB": 226.31,
+        "nodeRssMB": 121.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:36.722Z",
+        "obscuraTreeRssMB": 226.31,
+        "nodeRssMB": 122.27
+      },
+      {
+        "timestamp": "2026-08-20T10:58:36.981Z",
+        "obscuraTreeRssMB": 226.61,
+        "nodeRssMB": 122.52
+      },
+      {
+        "timestamp": "2026-08-20T10:58:37.239Z",
+        "obscuraTreeRssMB": 226.64,
+        "nodeRssMB": 122.65
+      },
+      {
+        "timestamp": "2026-08-20T10:58:37.491Z",
+        "obscuraTreeRssMB": 226.82,
+        "nodeRssMB": 122.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:37.748Z",
+        "obscuraTreeRssMB": 226.82,
+        "nodeRssMB": 122.9
+      },
+      {
+        "timestamp": "2026-08-20T10:58:38.006Z",
+        "obscuraTreeRssMB": 227.03,
+        "nodeRssMB": 123.02
+      },
+      {
+        "timestamp": "2026-08-20T10:58:38.263Z",
+        "obscuraTreeRssMB": 229.74,
+        "nodeRssMB": 123.15
+      },
+      {
+        "timestamp": "2026-08-20T10:58:38.517Z",
+        "obscuraTreeRssMB": 230.41,
+        "nodeRssMB": 123.27
+      },
+      {
+        "timestamp": "2026-08-20T10:58:38.777Z",
+        "obscuraTreeRssMB": 230.41,
+        "nodeRssMB": 123.4
+      },
+      {
+        "timestamp": "2026-08-20T10:58:39.036Z",
+        "obscuraTreeRssMB": 230.41,
+        "nodeRssMB": 123.65
+      },
+      {
+        "timestamp": "2026-08-20T10:58:39.294Z",
+        "obscuraTreeRssMB": 230.71,
+        "nodeRssMB": 123.77
+      },
+      {
+        "timestamp": "2026-08-20T10:58:39.473Z",
+        "obscuraTreeRssMB": 233.73,
+        "nodeRssMB": 124.4
+      }
+    ]
+  },
+  "post": {
+    "id": "t3_1uxx2bs",
+    "postIdClean": "1uxx2bs",
+    "title": "Is robotics industry broken?",
+    "author": "BroadRise3706",
+    "score": 83,
+    "upvoteRatio": 0.98,
+    "subreddit": "r/AskRobotics",
+    "totalReportedComments": 23,
+    "createdUtc": 1784191273,
+    "createdIso": "2026-07-16T08:41:13.000Z",
+    "selftext": "Hi\n\nI’ve spent quite a bit of time in this industry, working for start-ups or in academia, and recently I’ve been working as a freelancer. There was no way I could focus on one specific area of robotics, because I (and my colleagues) were dealing with so many different tasks under time pressure (and pressure from investors) that it was simply impossible. We tackled one problem after another just to keep everything running. The problem I see in robotics is this:\n\nWhen I speak to companies, it seems that everyone needs a specialist in a *very narrow* field of robotics. Technical interviews make me feel stupid after all this time. They cover topics such as \n1. inverting the Jacobian matrix for inverse kinematics,\n2. explaining the self-attention mechanism, \n3. writing code on the spot for some grid-based localisation method,\n4. carrying out code reviews (does that even make sense in 2026?),\n5. writing different variants of convolutions from scratch in python, \n6. explaining EKF equations, Lie groups, bundle adjustment and IMU pre-integration, \n7. discussing communication patterns in ROS, memory management in C++, templates, concurrency and network protocols, \n8. designing logging architectures, \n9. reviewing training loops in PyTorch, \n10. explaining object detection metrics, \n11. answering questions about leadership, project estimation, negotiation and communication with clients.\n12. Only God knows what still awaits me\n\n(these points are from actual interviews from recent 2-3 years, maybe someone would find this helpful)\n\nDon't get me wrong - each of these seems reasonable. However, they all appear in interviews for roles carrying a generic name \"(Senior) Robotics Engineer\". I observe the same companies looking for people for the same positions for months. Different HR agencies write me on Linkedin to apply for the same role I was rejected for no obvious reason months ago. How on earth can paying more than one headhunting agency for months on end be cost-effective at all?\n\nIs this simply the reality of senior robotics recruitment and I should come to accept it, or are companies testing for an unrealistic profile that almost nobody actually has? Or maybe people really do periodically refresh their memory of how to invert a matrix on a piece of paper, and I’m just the only one who doesn’t?",
+    "permalink": "/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/"
+  },
+  "comments": [
+    {
+      "id": "t1_oxun88d",
+      "commentIdClean": "oxun88d",
+      "author": "NickShipsRobots",
+      "score": 22,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784191690,
+      "createdIso": "2026-07-16T08:48:10.000Z",
+      "body": "This resonates, and I think part of what's happening is companies conflating \"robotics engineer\" with \"person who can absorb any robotics-adjacent task we throw at them,\" because most robotics teams are small and can't afford narrow specialists even if job title says otherwise.\n\nInterview list you gave is basically union of every subfield (classical control, perception, ML, systems/infra, plus soft skills for client-facing work) compressed into one role. That's not one job, that's three or four jobs stapled together because startup budget only allows for one hire.\n\nOn agencies recruiting for same role for months - probably not one broken profile they need, it's that requirements keep shifting mid-search as team figures out what they actually need, or budget/scope changes and nobody bothers updating listing. Doesn't mean the role is fake, just that hiring process is disorganized internally, and agency gets paid regardless of outcome so no strong incentive for them to push back on unrealistic spec.\n\nRejection with no feedback after months is separate problem though, that's just bad hiring practice independent of how broad requirements are.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy6tinh",
+      "commentIdClean": "oy6tinh",
+      "author": "ChrisAlbertson",
+      "score": 3,
+      "depth": 1,
+      "parentId": "t1_oxun88d",
+      "createdUtc": 1784329253,
+      "createdIso": "2026-07-17T23:00:53.000Z",
+      "body": "Yes, the interview list was a broad sampling, but each question was at the \"101 - beginning\" technical level. They did not ask for anything \"advanced,\" just the basics.\n\nThey want a person with broad theoretical knowledge and specific technical skills. Why: Theory does not go out of date. But knowing how to run Version 5.xx of some app will be a useless skill next year.  They are looking for an engineer with graduate-level education, not for a technician.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oyhlwzi",
+      "commentIdClean": "oyhlwzi",
+      "author": "crispyfunky",
+      "score": 2,
+      "depth": 2,
+      "parentId": "t1_oy6tinh",
+      "createdUtc": 1784473632,
+      "createdIso": "2026-07-19T15:07:12.000Z",
+      "body": "Yeah, but this is not what we are arguing about here. You look at these in questions in isolation and think “of course, they will ask about inverting Jacobian - I did that in my grad level class”. You may remember it conceptually but remembering how to invert a 3x3 matrix at the spot, cold may not be something you can do. ",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oxvvndo",
+      "commentIdClean": "oxvvndo",
+      "author": "qTHqq",
+      "score": 10,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784208636,
+      "createdIso": "2026-07-16T13:30:36.000Z",
+      "body": "I think it's much less about actually needing narrow specialists and much more about early and effective screen-out of the liars, fantasists, and LLM-generated resumes.\n\nMost roles just need people who are good at robotics, and for senior roles, they need people who think quickly, understand the big picture, and start to immediately break down problems into \"known solved,\" \"unsolvable at least with time and budget,\" and \"high risk, needs work.\" \n\nThe exact right senior of this type will mostly do work that needs to be done. An few hours of the right work at the right time can easily be worth someone else's week of muddled, fuzzy, or box-checkingly-lazy work.\n\nI kind of hate \"difficult\" interview questions and the way they put people on the spot, but at the same time the way someone responds, if they don't freeze entirely, is a pretty good predictor of how they are going to fare in a complex problem-solving environment.\n\nIt weeds out people who would do fine, even better, given low-pressure time thinking quietly to themselves, and it's unfair. But it very rapidly and effectively weeds out almost all people with poor skills. Unfortunately, it does so at the expense of not letting a relatively fewer set of excellent candidates through.\n\nI don't think it's going away because a bad hire is typically worse than no hire in a robotics startup environment at least. Easy to slow the whole team down. \n\n\nI think the other issue is just that so much robotics work is too high stakes, at least from my US perspective. Too much money in a few high-profile areas, too little money flowing to actually useful robotics, cost of living in talent- and opportunity- rich areas MUCH too high.\n\nI keep getting stuck working for fantasist founders who want to dominate the whole world without coming even close to the vision and drive that this takes in technically simpler product areas.\n\nI want to start a quiet little specialized robotics company and eventually attract my best coworkers, but a quiet little company doesn't really pay enough to live in my area. Increasingly it doesn't pay enough to live anywhere. And increasingly need to become grind factories if they provide real services.\n\nIf senior robotics recruiting was more like taking your favorite past coworkers and hanging out in your garage for a year until you cooked something worthwhile and revenue-positive, there would be a lot more healthy small companies with relaxed workflows that would be more accommodating of learning and slightly mismatched or less skilled hires.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy23hoo",
+      "commentIdClean": "oy23hoo",
+      "author": "BroadRise3706",
+      "score": 2,
+      "depth": 1,
+      "parentId": "t1_oxvvndo",
+      "createdUtc": 1784279183,
+      "createdIso": "2026-07-17T09:06:23.000Z",
+      "body": "\\>I kind of hate \"difficult\" interview questions and the way they put people on the spot, but at the same time the way someone responds, if they don't freeze entirely, is a pretty good predictor of how they are going to fare in a complex problem-solving environment.\n\nGood point. It’s easy to forget that these questions are sometimes asked deliberately, and the aim is not to get the right answer, but rather to observe the candidate’s reaction.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oxxp54o",
+      "commentIdClean": "oxxp54o",
+      "author": "CaliIsReallyNice",
+      "score": 8,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784225209,
+      "createdIso": "2026-07-16T18:06:49.000Z",
+      "body": "It’s just basic economics. 95% of robotics does not make money. None of the humanoids are making any money at all. Most of the agricultural robots are losing money. Most self-driving cars lose money. Drone delivery loses money. Position-controlled arms for manufacturing and automation and some drones make money. That’s about it. Everything else is just hype. It’s really fun to build and I like working on these problems, but it has never made money and that means it will always be a cut-throat industry.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_p3slz6u",
+      "commentIdClean": "p3slz6u",
+      "author": "Successful_Farm_9370",
+      "score": 1,
+      "depth": 1,
+      "parentId": "t1_oxxp54o",
+      "createdUtc": 1786774807,
+      "createdIso": "2026-08-15T06:20:07.000Z",
+      "body": "Exactly this. On the ledger sheet of \"resources necessary\" vs \"potential revenue\", the vast amount of robotics companies stand no chance, but they all try nonetheless. And that's why they demand super hero employees who can do everything.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oxwqdmm",
+      "commentIdClean": "oxwqdmm",
+      "author": "RickAmes",
+      "score": 3,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784216712,
+      "createdIso": "2026-07-16T15:45:12.000Z",
+      "body": "Yeah the pay doesn't match the knowledge required either since just being good at ML or traditional SWE will pay more. They just find some new passionate PhD and hope for the best.\nLooking at the insanity that MIT is requiring from its high school kids in their application portfolios, theres no hope for people who had to do and learn things without Daddy's money, LLMs and youtube tutorials.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy22ivi",
+      "commentIdClean": "oy22ivi",
+      "author": "BroadRise3706",
+      "score": 2,
+      "depth": 1,
+      "parentId": "t1_oxwqdmm",
+      "createdUtc": 1784278713,
+      "createdIso": "2026-07-17T08:58:33.000Z",
+      "body": "\\> theres no hope for people who had to do and learn things without Daddy's money, LLMs and youtube tutorials.  \n  \n\\+ english isn’t even my mother tongue so in fact I had to learn it all in a language which is foreigh to me xd not good..",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy3bvzf",
+      "commentIdClean": "oy3bvzf",
+      "author": "RickAmes",
+      "score": 1,
+      "depth": 2,
+      "parentId": "t1_oy22ivi",
+      "createdUtc": 1784295584,
+      "createdIso": "2026-07-17T13:39:44.000Z",
+      "body": "That must be difficult.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy6vmk1",
+      "commentIdClean": "oy6vmk1",
+      "author": "ChrisAlbertson",
+      "score": 2,
+      "depth": 1,
+      "parentId": "t1_oxwqdmm",
+      "createdUtc": 1784329921,
+      "createdIso": "2026-07-17T23:12:01.000Z",
+      "body": "It is not how you learned but what you learn. I hate to say it, but YouTube, LLMs, and \"enthusiast news leras\" are big on how-to and VERY light on theory and even lighter on the mathematics. You can watch and THINK you are learning, but the technical level is very low.\n\nWhat you get when you hire a university-educated engineer is a person who was evaluated by a university professor, who thought you were better than most students, so he gave you an \"A,\" and this happened a dozen times in a row with a dozen professors. If nothing else, this serves as a screening process.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oyc2d7z",
+      "commentIdClean": "oyc2d7z",
+      "author": "Thirust",
+      "score": 1,
+      "depth": 1,
+      "parentId": "t1_oxwqdmm",
+      "createdUtc": 1784399343,
+      "createdIso": "2026-07-18T18:29:03.000Z",
+      "body": "I was accepted to MIT without any of those. I had a 3.7 GPA but I worked my butt off learning Robotics and physics on my own and won national competitions. Neither of my parents graduated college and one didn't graduate high school. I went to a school with an average ACT of 16. This is stigma. Everybody has a chance if they work for it.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oxyu65j",
+      "commentIdClean": "oxyu65j",
+      "author": "NEK_TEK",
+      "score": 3,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784235680,
+      "createdIso": "2026-07-16T21:01:20.000Z",
+      "body": "I think the foundational issue with robotics is that only certain fields are actually profitable, most of it is just hype. The hype train can only run for so long before the money is gone, I can't even count how many failed robotics companies I've seen. \n\nI think their new tactic is to hire people with unrealistic experience and pay nothing close to what they are worth. With that being said, there are some fields that are very profitable, such as manufacturing but even manufacturing requires specialized skills such as ladder logic and PLCs. \n\nThen there is defense but defense robotics is very competitive and also requires high levels of skill/experience. I went to school for robotics but was only able to land an embedded software job. I love robotics and do it as a side hobby but I feel like the industry just isn't quite there yet for most people. ",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oxys6cy",
+      "commentIdClean": "oxys6cy",
+      "author": "aspectr",
+      "score": 2,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784235149,
+      "createdIso": "2026-07-16T20:52:29.000Z",
+      "body": "I think it's worth considering just not working for companies that are investor fueled startups that don't have experience or customers.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_p3sqly8",
+      "commentIdClean": "p3sqly8",
+      "author": "Successful_Farm_9370",
+      "score": 2,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1786777077,
+      "createdIso": "2026-08-15T06:57:57.000Z",
+      "body": "The expectations on robotics startup employees are absurd.\nI have worked for 1.5 years in two different startups at this point, here's what I have worked on:\n\nC++, Python, C#, JavaScript, Typescript, ML, Computer Vision, robot motion planning, ROS, simulation, Pneumatics, PLC wiring, 3D design and printing, GUI design and programming. And I get told almost weekly that I'm not fast and efficient enough.\n\nI am currently considering entirely switching careers, and keep robotics as a hobby, because that's where I still find it enjoyable. I used to enjoy coding, but AI is quickly killing that joy too.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oydctog",
+      "commentIdClean": "oydctog",
+      "author": "krackzero",
+      "score": 1,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784412847,
+      "createdIso": "2026-07-18T22:14:07.000Z",
+      "body": "I think this is the same in a lot of the technical fields.\n\nI feel like it strays very far from the real world, because it expects you to know \"everything\" on the spot.\n\nI don't need to memorize everything to do all of the different tasks in the different fields of engineering that I touch on a daily or weekly basis, even without AI",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_p034eem",
+      "commentIdClean": "p034eem",
+      "author": "FewStructure2719",
+      "score": 1,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1785169083,
+      "createdIso": "2026-07-27T16:18:03.000Z",
+      "body": "One thing I've noticed is that startups often end up looking for a robotics engineer when what they actually need is someone who can survive constant context switching.\n\nOne week it's debugging perception, the next it's reviewing a supplier's DFM feedback, then helping with manufacturing documentation or customer demos.\n\nThe job title stays the same, but the work changes every few weeks. From the outside it looks like companies are asking for an impossible candidate. In reality, I think many teams are still figuring out what they actually need because the company itself is changing so quickly.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_p2uk0o9",
+      "commentIdClean": "p2uk0o9",
+      "author": "Last-Promise8035",
+      "score": 1,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1786374392,
+      "createdIso": "2026-08-10T15:06:32.000Z",
+      "body": "Salut,\n\nMerci pour ce retour — et rassure-toi : **non, tu n'es pas stupide.** Ce que tu décris, c'est un problème systémique. Les boîtes veineuses un profil à 15 casquettes (cinématique inverse + DL + C++ temps réel + leadership + …) sous pression d'investisseurs. Résultat : elles recrutent personne.\n\n**Pourquoi faire un projet open source !!!! Pour montrer  les valeurs du savoir faire**\n\nL'open-source en communauté, c'est l'antidote : on prend le temps, on documente, chacun contribue là où il est fort.",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_p2w066n",
+      "commentIdClean": "p2w066n",
+      "author": "BroadRise3706",
+      "score": 1,
+      "depth": 1,
+      "parentId": "t1_p2uk0o9",
+      "createdUtc": 1786387646,
+      "createdIso": "2026-08-10T18:47:26.000Z",
+      "body": "Thanks. That's actually a good advice!",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy0bf07",
+      "commentIdClean": "oy0bf07",
+      "author": "Ekami66",
+      "score": 1,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784252039,
+      "createdIso": "2026-07-17T01:33:59.000Z",
+      "body": "This is exactly the kind of problem we are trying to solve with our framework: [https://peppy.bot/](https://peppy.bot/) . The idea is that every speciality of robotics should be confined to its own box instead of dealing with a monolithic codebase where every speciality conflates.\n\nWith our framework, if you're an AI engineer you should never have to worry about the rest of the stack, if you're a firmware engineer, same thing etc...  \n  \nWe're 2 weeks aways from releasing open source with support for [https://openarm.dev/](https://openarm.dev/) .",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oy6sme2",
+      "commentIdClean": "oy6sme2",
+      "author": "ChrisAlbertson",
+      "score": 1,
+      "depth": 0,
+      "parentId": "t3_1uxx2bs",
+      "createdUtc": 1784328973,
+      "createdIso": "2026-07-17T22:56:13.000Z",
+      "body": "If you do not know those basics that you listed, what DO you know?   I mean, what's left?\n\nAdd to that the fact that there are many people who do know every one of those bullet points; why should they compromise?\n\n  \nSo you stay, \"I don't know how to write software, I don't know kinematics, and by the way, the only way I do RL training is by downloading an example and running it; I can't create anything like that from scratch.   Please hire me.\"",
+      "visibility": "visible"
+    },
+    {
+      "id": "t1_oyfkfwi",
+      "commentIdClean": "oyfkfwi",
+      "author": "BroadRise3706",
+      "score": 1,
+      "depth": 1,
+      "parentId": "t1_oy6sme2",
+      "createdUtc": 1784443312,
+      "createdIso": "2026-07-19T06:41:52.000Z",
+      "body": "lol, is that all you got from my post? Feeling better because you know how to invert a jacobian?",
+      "visibility": "visible"
+    }
+  ],
+  "unresolvedMore": [],
+  "validation": {
+    "extractedCommentCount": 22,
+    "uniqueCommentCount": 22,
+    "duplicateIds": [],
+    "missingParentReferences": [],
+    "maxDepth": 2,
+    "unresolvedMoreNodeCount": 0,
+    "unresolvedMoreChildCount": 0,
+    "sourceTreeExhausted": true
+  }
+}
