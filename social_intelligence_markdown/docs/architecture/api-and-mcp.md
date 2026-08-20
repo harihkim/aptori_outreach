@@ -1,58 +1,53 @@
 # API and MCP Architecture
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-REST/SSE powers the first-party application; MCP exposes high-level domain capabilities to agents. Both are thin adapters over shared domain services.
+REST/SSE powers the first-party application; MCP exposes selected domain capabilities to agents. Both authenticate, validate, translate, and call the same application services.
 
-## API surface
-
-| **Area**      | **Representative endpoints**                                                                      |
-|---------------|---------------------------------------------------------------------------------------------------|
-| Campaigns     | POST /campaigns; GET/PATCH /campaigns/{id}; POST /campaigns/{id}/discover                         |
-| Opportunities | GET /opportunities; GET /opportunities/{id}; POST /{id}/dismiss; POST /{id}/save                  |
-| Analysis      | POST /conversations/{id}/analyze; POST /campaigns/{id}/cluster-themes                             |
-| Drafts        | POST /opportunities/{id}/drafts; PATCH /drafts/{id}; POST /drafts/{id}/regenerate                 |
-| Review        | GET /reviews/pending; POST /drafts/{id}/approve; POST /drafts/{id}/reject                         |
-| Media         | POST /media/jobs; GET /media/jobs/{id}; POST /webhooks/higgsfield                                 |
-| Publishing    | POST /publish/prepare/{approval_id}; publish execution disabled unless server validates approval. |
-| Events        | GET /events/stream (SSE) for discovery, analysis, browser, and media job progress.                |
-
-## MCP design
-
-MCP should expose domain-level operations, not raw database CRUD. External agents should be able to research, analyze, create drafts, and queue review while preserving the same server-side authorization and approval rules as the first-party UI.
-
-### Tools
-
-| **Category** | **Tools**                                                                                                        |
-|--------------|------------------------------------------------------------------------------------------------------------------|
-| Discovery    | search_reddit, discover_opportunities, refresh_campaign, get_thread                                              |
-| Intelligence | analyze_conversation, rank_opportunities, explain_opportunity, find_emerging_topics, cluster_conversations       |
-| Creative     | draft_reply, draft_reddit_post, create_content_ideas, create_content_package, create_media_brief, generate_media |
-| Review       | list_pending_reviews, get_draft, revise_draft, queue_for_review                                                  |
-| Analytics    | campaign_summary, topic_trends, retrieval_benchmark, engagement_summary                                          |
-
-### Resources and prompts
-
+## Adapter shape
 
 ```text
-Resources
-campaign://{campaign_id}
-opportunity://{opportunity_id}
-conversation://{conversation_id}
-draft://{draft_id}
-theme://{theme_id}
-Prompt templates
-/reddit-opportunities
-/create-content
-/review-drafts
+SvelteKit -> REST/SSE adapter ---+
+                                +-> application services -> domain model -> PostgreSQL
+MCP host  -> MCP adapter --------+
 ```
 
+Business rules, lifecycle transitions, score calculation, Draft Version creation, Approval, and Approved Artifact validation do not live in route handlers or MCP tool functions.
 
-Do not initially expose a generic post_reddit_comment(text=...) MCP tool. If publishing through MCP is added later, it should accept only an approval_id for an immutable approved artifact.
+## REST scope
 
-## Boundary rule
+| Area | Representative contract |
+|---|---|
+| Campaigns/retrieval | Campaign CRUD and Discovery Run creation/status |
+| Opportunities | ranked query, detail, save/dismiss |
+| Drafts | create Draft, append immutable version, regenerate to new version |
+| Review | create/revoke Approval for exact scoped action; record rejection |
+| Publishing | create Publish Preparation by `approval_id` only |
+| Events | SSE projections for long-running work and review/preparation states |
 
-Do not put business rules in route handlers or MCP tool functions. They authenticate/validate/translate and call domain services. This is what prevents the UI and external agents from developing different approval or scoring behavior.
+The hand-written semantics are in [REST and SSE API](../api/rest-api.md). Generated OpenAPI becomes the field-level authority when implementation begins.
 
-Detailed interface notes: [REST/SSE API](../api/rest-api.md) and [MCP tools/resources](../api/mcp-tools.md).
+## MCP scope
+
+The vertical slice proves headless access with three read tools:
+
+```text
+list_campaigns
+search_opportunities
+get_opportunity
+```
+
+Discovery mutation, creative, review-support, and analytics tools are expansion work. The prototype exposes no MCP Approval, Approved Artifact, Publish Preparation, or arbitrary posting capability.
+
+## Shared contract rules
+
+- Stable domain IDs cross adapters; provider SDK models do not.
+- Workspace authorization is enforced in application/domain services as well as adapter authentication.
+- Retried writes use idempotency keys and return the original canonical result.
+- Draft edits/regeneration always create a new immutable Draft Version.
+- Publish Preparation accepts no outbound overrides.
+- Pydantic AI deferred-tool state and MCP conversation history are not proof of human approval.
+- Long-running work returns a run/job ID; SSE or MCP resources expose projections rather than process-local state.
+
+See [MCP Tools and Resources](../api/mcp-tools.md), [Human Approval and Security](approval-security.md), and [Domain Model and State Machines](domain-model.md).

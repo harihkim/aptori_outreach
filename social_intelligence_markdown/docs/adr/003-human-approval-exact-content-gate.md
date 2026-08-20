@@ -1,36 +1,24 @@
-# ADR-003: Require human approval for the exact outbound artifact
+# ADR-003: Require human approval for the complete outbound action
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
 
 ## Context
 
-The system generates marketing/community content and controls browser workflows. Prompt-level instructions such as “ask before posting” are not a sufficient authorization boundary. The user requirement is explicit: nothing is posted automatically without human approval.
+Exact-text hashing prevents content substitution but does not prevent the same text from being sent with different media, from a different account, for another action, or to another destination. Prompt preferences and client-side agent history are not authorization boundaries.
 
 ## Decision
 
-Every outbound artifact must be versioned. Approval stores the human approver, timestamp, exact draft/media version and cryptographic checksum. Any content/media edit creates a new version and invalidates publish eligibility. Publishing workers accept an approved artifact ID/approval ID, not arbitrary text. Research workers have no posting tools.
+Human Approval binds one immutable Draft Version, ordered finalized media/checksums, Actor Account, action type, and exact Destination. The resulting authorization is expiring, revocable, and single-use by default. Any change to a bound value requires a new Approval. The Publish Preparation API accepts only an existing `approval_id`, resolves the Approved Artifact internally, and accepts no outbound overrides; research and LLM workers have no publishing capability.
 
 ## Consequences
 
-### Positive
-
-- Hard technical enforcement of user intent.
-- Auditable approval history.
-- Prevents agents/MCP clients from bypassing the review UI.
-- Exact-content checksum catches silent rewrites after approval.
-
-### Negative / trade-offs
-
-- More workflow/state complexity.
-- Regeneration or tiny edits require re-approval.
-
-## Revisit when
-
-- The product supports collaborative/multi-step approval requiring a richer approval policy.
-- A new platform requires additional confirmation semantics.
+- The system can audit the exact action the human authorized, not merely unchanged text.
+- Tiny edits and operational substitutions require fresh review.
+- Database constraints, atomic consumption, and capability-separated workers are required.
 
 ## Related documentation
 
-- [Approval and security](../architecture/approval-security.md)
-- [Product specification](../product/product-spec.md)
+- [Human Approval and Security](../architecture/approval-security.md)
+- [Domain Model and State Machines](../architecture/domain-model.md)
+- [ADR-010](010-separate-approval-from-approved-artifact.md)

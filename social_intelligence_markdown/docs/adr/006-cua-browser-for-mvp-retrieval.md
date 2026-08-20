@@ -1,37 +1,17 @@
 # ADR-006: Use CUA/browser automation for Reddit MVP retrieval
 
-- **Status:** Accepted for MVP
+- **Status:** Superseded by [ADR-009](009-retrieval-viability-gate-and-escalation.md)
 - **Date:** 2026-08-20
 
-## Context
+## Historical decision
 
-The required demonstration is Reddit-first, but official developer access is a separate workstream. Search/URL retrieval may be incomplete and direct scraping parsers are brittle. CUA provides isolated computer-use/browser infrastructure that can execute narrow read-only tasks.
+The original package selected Google Search/URL Context with CUA browser extraction as the assumed MVP retrieval ladder because official Reddit access was a separate workstream.
 
-## Decision
+## Why superseded
 
-Use a retrieval escalation ladder: Google Search grounding for discovery, Gemini URL Context where sufficient, then CUA browser extraction for incomplete cases or direct bounded Reddit search. Treat CUA as an MVP provider, not a permanent assumption for production.
-
-## Consequences
-
-### Positive
-
-- Enables the demo without blocking on developer approval.
-- Handles dynamic page behavior better than a static parser in some cases.
-- Sandbox boundary is useful for browser credentials/sessions.
-
-### Negative / trade-offs
-
-- Slower and costlier than deterministic APIs/fetches.
-- UI changes can break automation.
-- Platform access/policy constraints must be monitored.
-
-## Revisit when
-
-- Official Reddit access becomes available and is superior.
-- Benchmark shows another public retrieval approach is more reliable/cost-effective.
-- Browser failure/cost makes the approach unsuitable.
+Retrieval is too load-bearing to select before a frozen quantitative comparison. Crawlee supplies deterministic HTTP and Playwright variants worth measuring, while CUA is slower and less repeatable. The current decision makes retrieval a hard R0 gate and treats CUA as a last fallback rather than an assumed default.
 
 ## Related documentation
 
-- [Reddit retrieval architecture](../architecture/retrieval.md)
-- [Reddit access, Gemini and CUA notes](../research/reddit-access-and-gemini.md)
+- [ADR-009](009-retrieval-viability-gate-and-escalation.md)
+- [Reddit Retrieval Architecture](../architecture/retrieval.md)

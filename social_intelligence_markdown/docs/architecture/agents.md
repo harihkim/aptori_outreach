@@ -1,36 +1,61 @@
-# AI and Agent Design
+# Typed LLM and Agent Design
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-AI is used as typed, bounded reasoning/generation inside deterministic application workflows rather than as a single autonomous marketing agent.
+Pydantic AI is the default typed LLM execution layer for bounded extraction, classification, synthesis, evaluation support, and generation. Tool-using agents are one use case, not the organizing abstraction for every model call.
+
+## Control-plane boundary
+
+```text
+Application/domain workflow owns
+  state transitions, provider routing, whole-job retries, idempotency,
+  deterministic scoring, persistence, authorization, approval and audit
+
+Pydantic AI execution owns
+  model invocation, typed output validation, model-facing retries,
+  optional narrow tools, per-run limits, streaming events and telemetry
+```
+
+Using Pydantic AI's `Agent` API for a one-turn structured-output call does not make that component autonomous. Name components after their domain purpose, such as `ConversationAnalyzer` or `ReplyDraftGenerator`, rather than calling every LLM Task an agent.
+
+## Execution shape
 
 ```mermaid
 flowchart LR
-    D[Discover] --> N[Normalize]
-    N --> X[Deduplicate]
-    X --> F[Cheap filter]
-    F --> A[Typed intelligence call]
-    A --> S[Score + persist]
-    S --> G[Typed creative call]
-    G --> V[Draft version]
-    V --> H[Human review]
+    W[Domain worker/service] --> R[LLMTaskRunner]
+    R --> A[Pydantic AI Agent]
+    A --> V[Validated typed output]
+    V --> D[Domain validation]
+    D --> S[Deterministic score/state transition]
+    S --> P[(PostgreSQL)]
 ```
 
-## AI design: bounded agents inside deterministic workflows
+`LLMTaskRunner` is a small internal boundary, not a generic workflow framework. Every run receives:
 
-```text
-Discover -> Normalize -> Deduplicate -> Cheap filter
--> Analyze (typed AI) -> Score -> Persist
--> Draft (typed AI) -> Persist -> Human review
--> Approved artifact -> Browser prepare/publish worker
-```
+- stable `task_id` plus prompt and output-schema versions;
+- requested model policy and allowed fallback policy;
+- retry and usage limits;
+- immutable dependencies and correlation metadata;
+- a typed output contract and domain validators;
+- an evaluation suite identifier.
 
+## Initial LLM Task catalog
 
-Do not build one "super-agent" that decides the entire workflow. The application owns state transitions, retries, authorization, content hashes, provider routing, and audit events. AI is invoked for tasks that benefit from semantic reasoning or generation.
+| Task | Typed output | Tools | Domain use |
+|---|---|---|---|
+| `extract_thread_fields` | `ExtractedThreadFields` | None | Optional extraction experiment after raw retrieval; not the deterministic baseline |
+| `synthesize_thread` | `ThreadSynthesis` with positions, evidence references, unresolved questions | None normally | Conversation detail projection |
+| `analyze_conversation` | `ConversationAnalysis` factors, rationale, confidence, recommended action | None | Inputs to deterministic scoring and Opportunity creation |
+| `assess_claims_and_risk` | claims, evidence status, uncertainties, prohibited-claim flags | Optional read-only knowledge lookup | Draft validation support |
+| `generate_reply_candidates` | typed `DraftCandidate` list | Optional read-only approved company knowledge | Creates immutable Draft Versions after domain validation |
+| `generate_content_package` | platform variants and provenance | Optional read-only sources | Expansion milestone |
+| `create_media_brief` | `MediaBrief` | None | Expansion milestone |
+| `label_theme_cluster` | label and explanation | None | Labels a deterministic cluster; does not create membership |
 
-### Intelligence agent output
+Normalization, source-ID/URL deduplication, score calculation, lifecycle transitions, provider escalation, Approval, Approved Artifact creation, and Publish Preparation are not LLM Tasks.
 
+## Analysis output
 
 ```python
 class ConversationAnalysis(BaseModel):
@@ -53,25 +78,87 @@ class ConversationAnalysis(BaseModel):
     ]
 ```
 
+Schema validity does not prove truth, calibration, community fit, or commercial usefulness. Deterministic range/business validation and frozen labeled evaluations remain outside the model call.
 
-Use low-cost models for initial relevance/intent analysis. Reserve stronger models for borderline or high-value opportunities, complex thread synthesis, and final creative drafting. Model selection should be a configuration, not hard-coded in domain logic.
+## Draft output
 
-### Creative agent separation
+Prefer a typed `DraftCandidate` containing:
 
-- Reply generation uses thread context plus campaign guidance.
+```text
+text
+posture
+claims[]
+source_refs[]
+uncertainties[]
+safety_flags[]
+```
 
-- Standalone content generation uses approved company/product knowledge plus aggregate themes and externally verifiable facts as needed.
+Only the final validated candidate is persisted as a new Draft Version. Partial streamed output is a UI preview, never canonical content. A valid model output is not an approved artifact.
 
-- Media-brief generation produces visual objective, composition, style, aspect ratio, constraints, and a Higgsfield-ready prompt.
+## Model routing and fallback
 
-- Scoring and generation are separate model calls. This improves observability, cost control, evaluation, and regeneration behavior.
+- Select task models through versioned application configuration.
+- Use lower-cost models for ordinary analysis and stronger models only for explicitly classified borderline/high-value cases.
+- Keep quality escalation separate from availability fallback.
+- Maintain a tested compatibility matrix because structured-output modes, tools, schemas, and model settings differ across providers.
+- Do not let the model choose business routing, retry the whole workflow, or expand its own permissions.
 
-## Model routing principle
+## Retry ownership
 
-Use the least-expensive model that meets the quality threshold for each stage. Escalate borderline/high-value cases rather than using the strongest model for all candidates. Keep model/provider selection configuration-driven.
+| Layer | Owns |
+|---|---|
+| Provider transport | bounded network/rate-limit retries |
+| Pydantic AI run | small output/tool retry budget for validation failures |
+| Model fallback | configured provider/model availability failures |
+| Worker/application | idempotent whole-task retry and recovery |
 
-See [ADR-002](../adr/002-pydantic-ai-primary-orchestrator.md) and [ADR-005](../adr/005-bounded-agents-deterministic-workflows.md).
+Every model retry may incur another request and cost. Attempt counts and failure classes are persisted. Whole-task retries use an idempotency key so a replay does not create duplicate Analyses or Draft Versions.
 
-## Research references
+## Usage, provenance, and telemetry
 
-See the [research source catalog](../research/source-catalog.md) for the primary documentation and open-source repositories used during the initial design.
+Persist a `ModelRun` containing:
+
+```text
+task_id and task version
+prompt version and output-schema version
+requested and actual provider/model/settings
+Pydantic AI run metadata
+input/output hashes
+request, token and estimated-cost usage
+transport/output/tool retry counts
+correlation IDs and timestamps
+status and failure classification
+redaction/retention policy
+```
+
+Pydantic AI usage limits constrain individual runs; campaign/workspace budgets and queue admission remain application concerns. OpenTelemetry traces aid operations but do not replace PostgreSQL audit or provenance records. Full prompts/completions are excluded by default unless an explicit retention and redaction policy permits them.
+
+## Tools, dependencies, and permission safety
+
+- Inject only narrow stage-specific dependencies and immutable context.
+- Analysis and drafting may receive read-only source/company knowledge tools where necessary.
+- They never receive publishing credentials, the publishing port, Approval creation, or browser submit capability.
+- Dependency injection is a testability mechanism, not an authorization boundary; capability absence and server-side checks enforce permissions.
+- Deferred tools may pause an interaction for review, but cannot authorize publishing.
+
+## Evaluation strategy
+
+Use one frozen Pydantic Evals dataset per LLM Task. Start with deterministic evaluators and add carefully scoped LLM judges only for subjective qualities.
+
+| Task family | Evaluation focus |
+|---|---|
+| Extraction/synthesis | field/evidence completeness, unsupported statements, source-reference accuracy |
+| Analysis | factor agreement, calibration, recommended-action agreement, subgroup error analysis |
+| Drafting | helpfulness, factuality, naturalness, promotion appropriateness, community fit, claim safety |
+| Media briefs | objective/constraint completeness and consistency with approved content |
+
+Retrieval Precision@K, NDCG, provider overlap, completeness, and cost/useful-opportunity remain product metrics, not generic Pydantic Evals outputs.
+
+## Framework posture
+
+- Pin a tested Pydantic AI v2-compatible dependency range rather than floating on latest.
+- Prefer the high-level `Agent` API for most typed calls, including non-agentic single-turn tasks.
+- Use the low-level direct model API only when raw request/response control justifies implementing validation, retries, limits, and instrumentation separately.
+- Keep the prototype on Redis-backed workers. Pydantic AI durable integrations do not create durability unless the application adopts and operates a supported workflow runtime.
+
+See [ADR-002](../adr/002-pydantic-ai-primary-orchestrator.md), [ADR-005](../adr/005-bounded-agents-deterministic-workflows.md), [Human Approval and Security](approval-security.md), and the [Pydantic AI research note](../research/pydantic-ai-capabilities.md).

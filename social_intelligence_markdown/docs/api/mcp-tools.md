@@ -1,58 +1,71 @@
 # MCP Tools and Resources
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Agent-facing contract over the same core services used by the web application. MCP is not an alternate system of record.
+MCP is an agent-facing adapter over the same application services and authorization rules as REST. It is neither an alternate system of record nor a second workflow engine.
 
-## MCP design
+## Prototype proof
 
-MCP should expose domain-level operations, not raw database CRUD. External agents should be able to research, analyze, create drafts, and queue review while preserving the same server-side authorization and approval rules as the first-party UI.
+The first vertical slice needs only enough MCP surface to prove that domain services are headless:
 
-### Tools
+| Tool | Purpose |
+|---|---|
+| `list_campaigns` | Return campaigns visible to the authenticated workspace principal. |
+| `search_opportunities` | Query canonical ranked Opportunities by campaign and filters. |
+| `get_opportunity` | Return one Opportunity with Conversation, analysis, and provenance projections. |
 
-| **Category** | **Tools**                                                                                                        |
-|--------------|------------------------------------------------------------------------------------------------------------------|
-| Discovery    | search_reddit, discover_opportunities, refresh_campaign, get_thread                                              |
-| Intelligence | analyze_conversation, rank_opportunities, explain_opportunity, find_emerging_topics, cluster_conversations       |
-| Creative     | draft_reply, draft_reddit_post, create_content_ideas, create_content_package, create_media_brief, generate_media |
-| Review       | list_pending_reviews, get_draft, revise_draft, queue_for_review                                                  |
-| Analytics    | campaign_summary, topic_trends, retrieval_benchmark, engagement_summary                                          |
+These read tools should be implemented after their underlying domain services exist, without delaying Retrieval Gate R0 or the first-party review workflow.
 
-### Resources and prompts
+## Expansion tools
 
+| Category | Later tools |
+|---|---|
+| Discovery | `start_discovery_run`, `get_discovery_run`, `get_conversation` |
+| Intelligence | `analyze_conversation`, `explain_opportunity`, `find_emerging_topics`, `cluster_conversations` |
+| Creative | `create_reply_draft`, `create_draft_version`, `regenerate_draft`, `create_content_package`, `create_media_brief` |
+| Review support | `list_pending_reviews`, `get_draft`, `queue_for_review` |
+| Analytics | `campaign_summary`, `retrieval_benchmark`, `model_evaluation_summary` |
+
+Creating or revising a Draft always returns a new immutable Draft Version. MCP tools may queue a version for human review but cannot create an Approval, Approved Artifact, or Publish Preparation.
+
+## Resources
 
 ```text
-Resources
 campaign://{campaign_id}
 opportunity://{opportunity_id}
 conversation://{conversation_id}
 draft://{draft_id}
-theme://{theme_id}
-Prompt templates
-/reddit-opportunities
-/create-content
-/review-drafts
+draft-version://{draft_version_id}
+retrieval-observation://{observation_id}
 ```
 
+Resources are projections of canonical state. Sensitive account credentials, raw browser secrets, and unredacted model telemetry are never resources.
 
-Do not initially expose a generic post_reddit_comment(text=...) MCP tool. If publishing through MCP is added later, it should accept only an approval_id for an immutable approved artifact.
+## Capability boundary
 
-## Tool design rules
+- Do not expose generic database CRUD.
+- Do not expose `approve`, `create_approved_artifact`, `prepare_publish`, or arbitrary posting tools in the prototype MCP server.
+- External clients cannot prove human approval through message history or Pydantic AI deferred-tool results.
+- A future publishing MCP tool, if separately approved, may accept only `approval_id`; it cannot accept text, media, destination, Actor Account, or action overrides.
+- Authentication and workspace authorization are identical to REST.
+- Tool functions contain adapter logic only and call application/domain services.
 
-1. Prefer domain verbs over database CRUD.
-2. Return stable IDs and structured objects suitable for follow-up calls.
-3. Research/creative tools may create drafts but never manufacture approval.
-4. Queueing for review is allowed; approving on behalf of a human is not.
-5. A future publish tool, if exposed, takes only an existing server-issued `approval_id`.
-6. MCP authentication and workspace authorization are enforced exactly like REST.
-
-## Example agent flow
+## Example prototype flow
 
 ```text
-discover_opportunities(campaign_id)
-  -> get_thread(opportunity_id)
-  -> draft_reply(opportunity_id, posture="expertise_first")
-  -> queue_for_review(draft_id)
-  -> human reviews in UI
+list_campaigns()
+  -> search_opportunities(campaign_id, limit=10)
+  -> get_opportunity(opportunity_id)
 ```
+
+## Example later creative flow
+
+```text
+create_reply_draft(opportunity_id)
+  -> create_draft_version(draft_id, base_version_id, text)
+  -> queue_for_review(draft_version_id)
+  -> human reviews and approves in first-party UI
+```
+
+See [API and MCP Architecture](../architecture/api-and-mcp.md), [REST and SSE API](rest-api.md), and [Human Approval and Security](../architecture/approval-security.md).

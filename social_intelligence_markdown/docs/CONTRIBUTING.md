@@ -4,6 +4,16 @@
 
 Markdown under this directory is canonical. Generated DOCX/PDF exports should not be edited as the primary copy.
 
+Canonical domain language is defined in `../CONTEXT.md`. Update it when a domain term is resolved; keep implementation and lifecycle detail in architecture documents.
+
+## Version-control workflow
+
+- Keep documentation changes reviewable and atomic: research evidence, canonical contract changes, and generated exports are separate commits.
+- Record expensive-to-reverse decisions in an ADR and update every affected canonical document in the same change set.
+- Do not rewrite historical ADR intent silently; mark an ADR superseded and link its replacement when the decision changes materially.
+- Run Markdown link, whitespace, terminology, and cross-reference checks before committing.
+- Commit benchmark protocols before results so queries, labels, thresholds, and provider configurations cannot move after outcomes are known.
+
 ## When to update what
 
 - **Product behavior or scope:** update `product/`.

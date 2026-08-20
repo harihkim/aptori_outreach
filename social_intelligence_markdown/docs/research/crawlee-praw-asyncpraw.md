@@ -1,14 +1,15 @@
 # Crawlee, PRAW and Async PRAW for Reddit Retrieval
 
-> **Status:** Research note  
-> **Researched:** 2026-08-20  
+> **Status:** Research note
+> **Researched:** 2026-08-20
 > **Sources:** Official project repositories/documentation, PyPI metadata and Reddit policy/documentation only. Revalidate Reddit access and terms before implementation.
+> **Incorporated:** Canonical documentation v0.2.
 
 ## Conclusion
 
 Add two distinct provider paths to the retrieval spike:
 
-1. Use **Async PRAW**—not synchronous PRAW—for the future approved Reddit Data API provider. It matches the project's async `RedditProvider` contract and FastAPI/worker runtime while exposing essentially the same Reddit feature set as PRAW.
+1. Use **Async PRAW**—not synchronous PRAW—for the future approved Reddit Data API adapters. It matches the project's async discovery/fetch ports and FastAPI/worker runtime while exposing essentially the same Reddit feature set as PRAW.
 2. Benchmark **Crawlee HTTP/Parsel and Crawlee Playwright as explicit, deterministic known-URL fetch tiers before CUA**. Crawlee can make queueing, retries, throttling, snapshots and browser lifecycle more reliable; it is not a Reddit-native provider and should not replace official API access.
 
 The intended ladder becomes:
@@ -47,7 +48,7 @@ The version, Python and license data come from the projects' published package m
 
 ### Capabilities
 
-PRAW and Async PRAW are object-oriented wrappers over Reddit's API. They cover subreddit search and listings, direct submission lookup by ID/URL, submission/comment metadata, comment forests, subreddit rules, streams and Reddit write operations. The project should expose only the read subset through `RedditProvider`; the existence of reply/submit methods is not a reason to combine retrieval and publishing credentials or interfaces. The PRAW maintainers describe Async PRAW as the official async version with similar usage and the same features. ([PRAW repository](https://github.com/praw-dev/praw), [Async PRAW repository](https://github.com/praw-dev/asyncpraw), [PRAW subreddit search](https://praw.readthedocs.io/en/stable/code_overview/other/subreddit.html#praw.models.Subreddit.search))
+PRAW and Async PRAW are object-oriented wrappers over Reddit's API. They cover subreddit search and listings, direct submission lookup by ID/URL, submission/comment metadata, comment forests, subreddit rules, streams and Reddit write operations. The project should expose only the read subset through its discovery/fetch ports; the existence of reply/submit methods is not a reason to combine retrieval and publishing credentials or interfaces. The PRAW maintainers describe Async PRAW as the official async version with similar usage and the same features. ([PRAW repository](https://github.com/praw-dev/praw), [Async PRAW repository](https://github.com/praw-dev/asyncpraw), [PRAW subreddit search](https://praw.readthedocs.io/en/stable/code_overview/other/subreddit.html#praw.models.Subreddit.search))
 
 Useful official-provider operations are:
 

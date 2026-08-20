@@ -1,6 +1,6 @@
 # Research Source Catalog
 
-> **Status:** Living reference  
+> **Status:** Living reference
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 External references used during the initial product/architecture research. Verify time-sensitive policy/API claims against current primary documentation before shipping.
@@ -37,7 +37,7 @@ External references used during the initial product/architecture research. Verif
 
 **\[R15\]** [RedoraAI GitHub](https://github.com/donebyai-team/RedoraAI) - Reddit lead-generation workflow and architecture; MIT.
 
-**\[R16\]** [PRAW GitHub](https://github.com/praw-dev/praw) - Mature Python Reddit API wrapper; BSD-2-Clause.
+**\[R16\]** [PRAW GitHub](https://github.com/praw-dev/praw) - Mature synchronous Python Reddit API wrapper; BSD-2-Clause.
 
 **\[R17\]** [RedditRadar GitHub](https://github.com/devravik/RedditRadar) - Reddit monitoring and AI lead dashboard; MIT.
 
@@ -50,3 +50,19 @@ External references used during the initial product/architecture research. Verif
 **\[R21\]** [Postiz GitHub](https://github.com/gitroomhq/postiz-app) - Self-hosted multi-channel social scheduling; evaluate licensing/integration model before reuse.
 
 **\[R22\]** [reddit-mcp-server GitHub](https://github.com/eliasbiondo/reddit-mcp-server) - Example Reddit MCP read/search tool surface.
+
+**\[R23\]** [Async PRAW GitHub](https://github.com/praw-dev/asyncpraw) - Official asynchronous PRAW variant and recommended implementation for the async backend; BSD-2-Clause.
+
+**\[R24\]** [Crawlee for Python GitHub](https://github.com/apify/crawlee-python) - Async HTTP/browser crawling, queues, sessions, retries, throttling and storage; Apache-2.0.
+
+**\[R25\]** [Crawlee - Pydantic AI crawler](https://crawlee.dev/python/docs/guides/pydantic-ai-crawler) - Experimental typed LLM extraction over HTTP/Parsel and its cost/runtime boundaries.
+
+**\[R26\]** [Pydantic AI - output](https://pydantic.dev/docs/ai/core-concepts/output/) - Typed structured outputs, validation, retries and streaming semantics.
+
+**\[R27\]** [Pydantic AI - retries](https://pydantic.dev/docs/ai/core-concepts/retries/) - Distinguishes transport, model, tool, output and whole-run retry responsibilities.
+
+**\[R28\]** [Pydantic Evals](https://pydantic.dev/docs/ai/evals/evals/) - Versioned datasets, evaluators and experiment reports for bounded LLM Tasks.
+
+**\[R29\]** [Reddit Data API Wiki](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) - OAuth, User-Agent, rate-limit and deletion/retention guidance.
+
+**\[R30\]** [Reddit Data API Terms](https://redditinc.com/policies/data-api-terms) - Access, use, retention and control-circumvention constraints.

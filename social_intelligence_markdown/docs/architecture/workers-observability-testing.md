@@ -1,65 +1,82 @@
-# Workers, Observability and Testing
+# Workers, Observability, and Testing
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Long-running browser, model and media work executes in workers, with correlated telemetry and evaluation fixtures.
+Long-running retrieval, model, browser, and later media work executes in workers with explicit capability boundaries, idempotent jobs, correlated telemetry, and frozen evaluation fixtures.
 
 ## Worker and job design
 
-| **Job**              | **Characteristics**                                | **Retry notes**                                                     |
-|----------------------|----------------------------------------------------|---------------------------------------------------------------------|
-| discovery_run        | Search and browser retrieval; potentially minutes. | Retry provider/transient failures; preserve per-candidate progress. |
-| fetch_thread         | Browser/URL retrieval for one conversation.        | Idempotent by source URL/external ID.                               |
-| analyze_conversation | Typed model call.                                  | Retry model/network failures; version outputs.                      |
-| cluster_themes       | Batch compute over recent relevant conversations.  | Can rebuild from source data.                                       |
-| generate_draft       | Model generation.                                  | New model run creates new draft version.                            |
-| generate_media       | Long-running provider job.                         | Use provider request ID and webhook idempotency.                    |
-| prepare_publish      | Browser navigation/fill.                           | Must revalidate approval and content hash at execution time.        |
+| Job | Characteristics | Retry and idempotency rule |
+|---|---|---|
+| `run_discovery` | Executes frozen provider plan and records Candidates/observations | Preserve per-query/provider progress; classify access/policy stops separately from transient failures |
+| `fetch_thread` | One locator through one explicit fetcher tier | Every attempt creates a Retrieval Observation; idempotent canonical upsert by source ID |
+| `normalize_observation` | Deterministic raw-evidence transformation | Same raw artifact + extractor version must produce the same hash |
+| `analyze_conversation` | Versioned Pydantic AI LLM Task | Whole-job idempotency prevents duplicate Analysis; model retries are separately counted |
+| `generate_draft` | Versioned Pydantic AI LLM Task | Each successful new attempt creates exactly one Draft Version |
+| `prepare_publish` | Revalidate/consume Approved Artifact and prepare browser | Atomic single-use transition; no arbitrary payload or blind whole-job replay |
+| `cluster_themes` | Expansion batch computation | Rebuildable from canonical Conversations/Analyses |
+| `generate_media` | Expansion provider job | Idempotent by provider request key and webhook event ID |
 
-FastAPI BackgroundTasks is not the right place for browser sessions, media generation, or multi-step workflows. Use a real worker queue. Start lightweight; move to a durable workflow engine only if workflow complexity, long waits, or human-in-the-loop recovery makes it necessary.
+FastAPI `BackgroundTasks` is not suitable for browser sessions, multi-provider retrieval, model pipelines, or human-waiting workflows. Start with a real Redis-backed worker queue; adopt a durable workflow engine only when demonstrated recovery/replay needs justify it.
 
-## Observability and auditability
+## Capability separation
 
-- Correlation IDs across HTTP request, worker job, browser session, model call, and provider request.
+```text
+retrieval worker
+  has: discovery/fetch ports, evidence store
+  lacks: review and publishing ports/credentials
 
-- Structured logs for provider, model, latency, token/cost estimate, retries, and failure reason.
+LLM Task worker
+  has: Pydantic AI, read-only task dependencies
+  lacks: approval and publishing ports/credentials
 
-- Metrics: candidates/run, fetch success rate, analysis latency, precision labels, draft acceptance, approval latency, CUA step count, media job latency.
+preparation worker
+  has: read-only Approved Artifact resolver, preparation browser profile
+  lacks: content editing, approval creation, final-submit capability
+```
 
-- Trace model prompt template version and structured output schema version.
+## Observability and evidence
 
-- Store only the minimum browser screenshots/logs necessary for debugging, with configurable retention.
+- Correlation IDs span request, application command, worker job, Retrieval Observation, Model Run, browser session, and external provider request.
+- Retrieval telemetry includes provider/method/version, status/failure class, completeness, latency, retries, bytes/browser time/model tokens, and cost.
+- Model telemetry includes task/prompt/schema versions, requested/actual provider/model/settings, transport/output/tool retries, usage, estimated cost, and time to first/final output.
+- Approval telemetry records the human decision, artifact digest, expiry/revocation/consumption, and rejected override/replay attempts.
+- OpenTelemetry/Logfire may aid operations, but PostgreSQL/domain audit remains authoritative.
+- Prompt/completion bodies and browser screenshots are redacted/excluded by default and retained only under explicit policy.
 
-- Audit events for every approval, rejection, publish preparation, and publish attempt.
+## Retrieval Gate R0 tests
 
-## Testing and evaluation strategy
+- Frozen query/corpus/label/config hashes match `protocol.json`.
+- Each provider run emits results even for terminal failures.
+- Discovery and known-thread metrics are computed independently.
+- Same raw observation replay produces identical normalized output.
+- Access denial never triggers proxy, fingerprint, session, or identity rotation.
+- Report includes all variants, costs, and policy stops; no winner-only report.
 
-### Retrieval benchmark
+Detailed metrics and thresholds are in [Retrieval Gate R0](../research/retrieval-benchmark.md).
 
-| **Method**                       | **Measure**                                                     |
-|----------------------------------|-----------------------------------------------------------------|
-| Gemini Google Search grounding   | Unique Reddit URLs, relevant URLs, freshness, latency, cost.    |
-| Search + Gemini URL Context      | Successful full/thread extraction rate and comment coverage.    |
-| CUA direct Reddit browser search | Coverage, extraction quality, steps, latency, failure modes.    |
-| CUA fetch known URL              | Deterministic thread extraction success and field completeness. |
+## LLM Task tests
 
-### Model evaluation
+- Unit tests use Pydantic AI `TestModel`/`FunctionModel`, dependency overrides, and a default block on accidental real model requests.
+- Contract tests cover typed input/output validation and domain validators.
+- Frozen Pydantic Evals datasets compare prompt/model/schema variants for each task.
+- Real-model quality tests are separate from deterministic integration tests.
+- Streaming tests prove partial output cannot create authoritative Analysis, Draft Version, Approval, or score state.
+- Retry tests prove replay does not duplicate Model Runs' domain effects.
 
-- Maintain a labeled conversation set with relevance, intent, recommended action, and promotion-fit labels.
+## Approval invariant tests
 
-- Evaluate precision@K, action agreement, calibration, and rationale quality.
+- Draft Version rows reject mutation and version numbers are unique per Draft.
+- Editing/regeneration always produces a new version.
+- Approval rejects unresolved, mutable, checksum-mismatched, or cross-workspace content/media/account/destination references.
+- Preparation rejects missing, expired, revoked, consumed, or digest-mismatched artifacts.
+- One-character text changes and every media/destination/account/action substitution require re-approval.
+- Unknown preparation override fields fail closed.
+- Concurrent preparation attempts cannot consume the same single-use artifact.
+- Research, MCP, and LLM Task workers cannot invoke preparation.
+- The prototype browser adapter exposes no final-submit action.
 
-- Create adversarial examples: sarcasm, competitor fan posts, generic mentions, old threads, sensitive topics, prohibited-claim traps.
+## Failure recovery rule
 
-- Evaluate drafts separately from scoring: helpfulness, factuality, naturalness, promotion appropriateness, and community fit.
-
-### Approval invariant tests
-
-- Publish/prepare endpoint rejects missing, expired, rejected, or mismatched approvals.
-
-- Approved text edited by one character becomes ineligible until re-approved.
-
-- Research worker cannot import/invoke publish implementation.
-
-- MCP clients cannot manufacture an approval by submitting client-side history or arbitrary content.
+Resume technical work from persisted observations, Model Runs, and job checkpoints. Never recover by weakening authorization, silently changing provider configuration, discarding failed variants, or mutating an immutable Draft Version/Approved Artifact.

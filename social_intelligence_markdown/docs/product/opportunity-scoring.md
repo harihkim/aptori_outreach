@@ -1,13 +1,13 @@
 # Opportunity Scoring
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Defines the first scoring model and the important separation between opportunity value and permission/appropriateness to promote.
 
 ## Opportunity model and scoring
 
-The platform should retain component scores rather than only one opaque number. A single overall score is useful for sorting, but operators need to see the reasons behind it.
+The versioned Pydantic AI Analysis task produces validated semantic factors, rationale, confidence, and a recommended action. Application code computes the aggregate Opportunity score from the frozen formula; the model does not directly set ranking state.
 
 | **Signal**           | **Meaning**                                                              | **Example weight** |
 |----------------------|--------------------------------------------------------------------------|--------------------|
@@ -32,7 +32,7 @@ Example analysis:
   "replyability": 0.91,
   "product_fit": 0.89,
   "promotion_fit": 0.34,
-  "recommended_action": "helpful_reply_no_product",
+  "recommended_action": "reply_helpfully",
   "reason": "Direct problem fit, but the user did not ask for vendor recommendations."
 }
 ```
@@ -41,6 +41,8 @@ Example analysis:
 
 - Store component scores and rationale, not only the aggregate score.
 - Version the scoring formula and model schema so historical results remain explainable.
+- Persist the Model Run separately from the deterministic scoring-formula version.
+- Reject out-of-range or internally inconsistent typed factors before calculating the score.
 - Keep `promotion_fit` outside the overall opportunity score. A valuable conversation may warrant a product-free expert response.
 - Add explicit uncertainty/confidence and allow an operator to override the recommended action.
-- Use operator labels to calibrate weights after the MVP rather than treating the initial formula as permanent.
+- Calibrate weights against a frozen labeled evaluation rather than changing them after inspecting one demo result set.

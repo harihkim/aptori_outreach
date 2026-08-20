@@ -1,35 +1,23 @@
-# ADR-005: Use bounded AI agents inside deterministic workflows
+# ADR-005: Use bounded LLM Tasks inside deterministic workflows
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
 
 ## Context
 
-A “super agent” controlling discovery, scoring, publishing and retries would be difficult to audit and test. The platform needs strict approval rules, idempotent jobs, reproducible state transitions and cost control.
+A super-agent controlling discovery, scoring, retries, approval, and publishing would be difficult to test, recover, cost-bound, and authorize. Many useful model operations require no planning or tools at all.
 
 ## Decision
 
-Application code owns state transitions, provider routing, retries, authorization, deduplication, audit and approvals. AI/model calls are bounded nodes for semantic tasks such as classification, synthesis, drafting and media briefs, returning typed outputs.
+Application code owns state transitions, provider routing, whole-job retries, idempotency, deterministic scoring, persistence, authorization, audit, and Approval. Pydantic AI executes named bounded LLM Tasks for semantic work and returns typed outputs. Optional tools and open-ended planning are added only for tasks that demonstrate a need and cannot weaken application permissions.
 
 ## Consequences
 
-### Positive
-
-- Predictable retries and recovery.
-- Easier evaluation of scoring versus generation.
-- Lower model cost through targeted routing.
-- Safer tool permissions and clearer audit trails.
-
-### Negative / trade-offs
-
-- More explicit workflow code.
-- Less flexibility than unconstrained agent loops for unforeseen tasks.
-
-## Revisit when
-
-- A future workflow genuinely benefits from open-ended planning and can be sandboxed without weakening approval/audit guarantees.
+- Scoring, analysis, and generation can be evaluated independently.
+- Retry/cost ownership and recovery remain explicit.
+- More workflow code exists outside the model, but it is testable and auditable.
 
 ## Related documentation
 
-- [AI and agent design](../architecture/agents.md)
-- [Workers, observability and testing](../architecture/workers-observability-testing.md)
+- [Typed LLM and Agent Design](../architecture/agents.md)
+- [Workers, Observability, and Testing](../architecture/workers-observability-testing.md)

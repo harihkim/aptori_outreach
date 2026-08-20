@@ -1,36 +1,25 @@
-# ADR-002: Use Pydantic AI as the primary AI orchestration layer
+# ADR-002: Use Pydantic AI as the primary typed LLM execution layer
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
 
 ## Context
 
-The backend is Python/FastAPI and the product relies heavily on typed structured outputs: conversation analysis, recommended action, drafts, media briefs and deferred/human-reviewed tool actions. LangChain has a broad ecosystem, but adopting its full abstraction stack is not required for this problem.
+The product needs typed model work across extraction, classification, synthesis, analysis, drafting, risk assessment, media briefs, evaluations, and occasional tool-using flows. Describing Pydantic AI only as “agent orchestration” would encourage separate vendor-SDK paths for ordinary single-turn LLM calls and fragment validation, retries, limits, and telemetry.
 
 ## Decision
 
-Use Pydantic AI as the default framework for model/tool orchestration and typed outputs. Integrate isolated LangChain tools only when a specific connector materially benefits from them.
+Use a pinned Pydantic AI v2-compatible range as the default execution layer for all product LLM Tasks, including non-agentic single-turn structured calls. Prefer the high-level `Agent` API for its typed outputs, validation, dependencies, limits, streaming, and instrumentation. Application/domain code continues to own workflow state, deterministic scoring, whole-job retries, persistence, provider policy, authorization, Approval, and publishing.
 
 ## Consequences
 
-### Positive
-
-- Strong fit with Pydantic/FastAPI models.
-- Validated typed model outputs.
-- Good fit for MCP and human-in-the-loop/deferred tools.
-- Keeps application/domain types central.
-
-### Negative / trade-offs
-
-- Smaller ecosystem than the full LangChain/LangGraph universe in some integration areas.
-- May require custom adapters for niche tools.
-
-## Revisit when
-
-- A required workflow is significantly easier or more reliable in another framework.
-- The team standardizes on a different orchestration platform.
+- Model-facing behavior and provenance use one typed boundary.
+- Each semantic task requires a named/versioned contract, budgets, and evaluation suite.
+- Provider portability remains tested rather than assumed because model capabilities differ.
+- Pydantic AI deferred-tool approval cannot authorize publishing.
+- Another framework may be integrated only behind a specific LLM Task when evidence justifies the additional path.
 
 ## Related documentation
 
-- [AI and agent design](../architecture/agents.md)
-- [System design](../architecture/system-design.md)
+- [Typed LLM and Agent Design](../architecture/agents.md)
+- [Pydantic AI research note](../research/pydantic-ai-capabilities.md)

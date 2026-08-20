@@ -1,92 +1,96 @@
 # System Design
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-The platform is **headless-first**, with a first-party SvelteKit application and an agent-native MCP interface. Both call the same domain services and authorization rules; neither is the system of record. PostgreSQL is canonical state.
+The platform is headless-first, with a first-party SvelteKit application and an agent-native MCP adapter. Both call the same application/domain services and authorization rules; PostgreSQL is canonical state.
 
 ```mermaid
 flowchart TB
-    UI[Svelte 5 / SvelteKit] --> REST[FastAPI REST + SSE]
-    AG[External agent / MCP host] --> MCP[MCP server]
-    REST --> CORE[Domain services]
+    UI[SvelteKit UI] --> REST[FastAPI REST + SSE]
+    AG[MCP client] --> MCP[MCP server]
+    REST --> CORE[Application and domain services]
     MCP --> CORE
     CORE --> PG[(PostgreSQL)]
-    CORE --> Q[Redis / worker queue]
-    Q --> W[Workers]
-    W --> GEM[Gemini Search / URL Context / Computer Use]
-    W --> CUA[CUA sandboxes]
-    W --> HIG[Higgsfield]
-    CUA --> RED[Reddit]
-    W --> OBJ[(Object storage)]
+    CORE --> Q[Redis worker queue]
+    Q --> RW[Retrieval workers]
+    Q --> LW[LLM Task workers]
+    Q --> PW[Preparation worker]
+    RW --> SEARCH[Search / URL Context]
+    RW --> CRAWLEE[Crawlee HTTP / Playwright]
+    RW --> CUA[CUA]
+    RW -. approved access .-> APRAW[Async PRAW]
+    LW --> PAI[Pydantic AI]
+    PW --> CUA
+    Q -. expansion .-> HIG[Higgsfield]
+    RW --> OBJ[(Evidence/object storage)]
 ```
 
 ## Architecture decision
 
-Build a headless core platform with a first-party SvelteKit client and a first-class MCP server. FastAPI exposes application APIs; PostgreSQL is the system of record; worker processes execute long-running retrieval, analysis, and media jobs. Pydantic AI provides typed, bounded AI steps. Browser automation is isolated behind a RedditProvider interface so the retrieval method can change without affecting the rest of the product.
+FastAPI exposes application APIs; PostgreSQL stores canonical domain state; workers execute long-running retrieval, model, browser, and later media work. Pydantic AI is the default typed LLM execution layer for both simple structured calls and bounded tool-using agents. Retrieval uses capability-specific discovery/fetch ports selected only after Gate R0.
 
-
-> **Why not MCP-only?** MCP is excellent for agent access, but campaign configuration, bulk opportunity triage, visual comparison, edit/review, media selection, and approval are better first-party UI workflows. MCP is an adapter over the same domain services, not the canonical product state.
+MCP is valuable for agent access, but campaign configuration, bulk triage, source inspection, content diffs, account/destination selection, and approval are better first-party UI workflows. MCP remains a thin adapter rather than a second product state or authorization path.
 
 ## Recommended technology stack
 
-| **Layer**           | **Recommendation**                                      | **Rationale**                                                                                 |
-|---------------------|---------------------------------------------------------|-----------------------------------------------------------------------------------------------|
-| Web client          | Svelte 5 + SvelteKit + TypeScript                       | Fast, concise UI with good SSR/app ergonomics.                                                |
-| UI system           | shadcn-svelte + Bits UI                                 | Accessible primitives plus composable application styling.                                    |
-| Server state        | TanStack Query for Svelte                               | First-class Svelte support; fits API-heavy server state.                                      |
-| Tables/large lists  | TanStack Table + Virtual as needed                      | Opportunity inbox and audit/history views benefit from sorting/filtering/virtualization.      |
-| API                 | FastAPI + Pydantic                                      | Typed contracts, async endpoints, generated OpenAPI, Python AI ecosystem.                     |
-| AI orchestration    | Pydantic AI                                             | Structured outputs, MCP integration, deferred tools/human approval, multiple model providers. |
-| Database            | PostgreSQL + SQLAlchemy 2 + Alembic                     | Canonical relational state, JSONB for model payloads, migrations, strong constraints.         |
-| Queue/cache         | Redis + lightweight worker framework                    | Retries, job coordination, locks, short-lived cache; avoid Kafka initially.                   |
-| Browser execution   | CUA (trycua/cua) + browser runtime                      | Sandboxed computer-use execution and cross-OS driver abstractions.                            |
-| Discovery/LLM tools | Gemini Search/URL Context/Computer Use where beneficial | Search grounding, URL retrieval, and native computer-use capabilities.                        |
-| Generative media    | Higgsfield API                                          | One async API for images/video and webhook-based completion.                                  |
+| Layer | Recommendation | Rationale/status |
+|---|---|---|
+| Web client | Svelte 5 + SvelteKit + TypeScript | First-party operating and review surface |
+| UI system | shadcn-svelte + Bits UI | Accessible composable primitives |
+| Server state | TanStack Query for Svelte | API-heavy server state |
+| Large lists | TanStack Table/Virtual as needed | Opportunity inbox projections |
+| API | FastAPI + Pydantic | Typed async contracts and generated OpenAPI |
+| Typed LLM execution | Pydantic AI v2-compatible pinned range | Structured outputs, validation, tools when needed, limits, evals, telemetry |
+| Database | PostgreSQL + SQLAlchemy 2 + Alembic | Canonical state and authorization constraints |
+| Queue/cache | Redis + lightweight worker framework | Prototype jobs, retries, coordination; avoid Kafka initially |
+| Retrieval | R0-selected adapters behind discovery/fetch ports | Search, URL Context, Crawlee HTTP/Playwright, CUA compared quantitatively |
+| Official Reddit | Async PRAW after approved access | Async structured provider; not an MVP dependency |
+| Media | Higgsfield API in expansion | Optional, outside vertical-slice critical path |
+| Object storage | S3-compatible | Immutable retrieval evidence and finalized media |
 
 ## Domain boundaries
 
-| **Module**    | **Owns**                                                              | **Does not own**                    |
-|---------------|-----------------------------------------------------------------------|-------------------------------------|
-| Campaigns     | Targeting, product/ICP context, promotion posture, source settings.   | Retrieval implementation.           |
-| Discovery     | Search jobs, provider routing, source provenance.                     | Marketing reasoning.                |
-| Conversations | Normalization, canonical thread/post/comment entities, deduplication. | Draft generation.                   |
-| Intelligence  | Analysis schema, scoring, themes, recommended actions.                | Publishing.                         |
-| Creative      | Reply drafts, post drafts, content packages, media briefs.            | Approval authority.                 |
-| Media         | Higgsfield requests, status, assets, storage metadata.                | Publishing decisions.               |
-| Review        | Draft versions, approval records, rejection reasons, hashes.          | Direct data retrieval.              |
-| Publishing    | Preparing or executing only approved outbound artifacts.              | Draft editing.                      |
-| MCP           | Agent-facing projection of domain capabilities.                       | Independent business rules/state.   |
-| Audit         | Immutable-ish event trail and provenance.                             | User-facing analytics calculations. |
+| Module | Owns | Does not own |
+|---|---|---|
+| Campaigns | targeting, product/ICP context, promotion posture, source settings | retrieval implementation |
+| Discovery | Discovery Runs, source routing, Candidate provenance | canonical thread identity or marketing reasoning |
+| Conversations | Retrieval Observations, normalization, canonical source identity, deduplication/tombstones | Campaign-specific scoring |
+| Intelligence | LLM Task inputs/outputs, deterministic scoring, Opportunities, explanations | publishing |
+| Creative | Drafts and immutable Draft Versions | approval authority |
+| Media | later media jobs, finalized assets, checksums, provenance | approval decisions |
+| Review | human Approval and immutable Approved Artifact | browser execution |
+| Publishing | Publish Preparation and execution evidence | editing, destination substitution, authorization creation |
+| MCP | agent-facing projections of application capabilities | independent business rules/state |
+| Audit | append-oriented decision, artifact, job, and provenance events | operational tracing alone |
 
 ## Deployment shape
 
 ```text
-Web/App: SvelteKit
-API: FastAPI
-Worker: Python worker processes
-Database: PostgreSQL
-Queue/cache: Redis
-Browser pool: isolated CUA sandboxes
-Object store: S3-compatible storage for generated media
-External: Gemini APIs, Higgsfield API
-Interfaces: REST/SSE + MCP
+SvelteKit web application
+FastAPI application + MCP adapter
+Python worker processes separated by capability
+PostgreSQL
+Redis
+isolated browser pool
+S3-compatible evidence/media store
+external model, retrieval, Reddit, and later media providers
 ```
 
+For the prototype, one application deployment plus capability-separated workers is sufficient. Separation means credentials and callable ports differ even if processes share a repository/deployment unit. Do not split into network microservices without a concrete scaling, isolation, ownership, or deployment need.
 
-For the MVP, a single application deployment plus one or more workers is sufficient. Do not split into microservices until scaling, isolation, ownership, or deployment cadence creates a concrete need.
+## Gates and open decisions
 
-## Technical decisions and open questions
+| Item | Decision or experiment |
+|---|---|
+| Retrieval viability | Hard R0 gate with frozen queries/labels and explicit quality, completeness, reliability, latency, cost, evidence, and policy thresholds |
+| Pydantic AI | Default typed LLM execution layer, including non-agentic calls; application remains control plane |
+| Retrieval ports | Separate `RedditDiscoverySource` and `RedditThreadFetcher`; publishing stays separate |
+| Crawlee | Benchmark HTTP/Parsel and fixed Playwright tiers; no evasion configuration; transient storage only |
+| Reddit official API | Async PRAW implementation choice after approval; separate access/commercial-use workstream |
+| MCP | Three read tools in the vertical slice; broader surface later |
+| Final click | Preferred prototype stops with exact approved content ready and leaves submit to the human |
+| Media | Higgsfield remains an expansion/wow feature, not a vertical-slice prerequisite |
+| Workflow engine | Redis-backed workers first; reevaluate durable engines only on demonstrated multi-day/replay needs |
 
-| **Item**                  | **Decision / experiment**                                                                                                          |
-|---------------------------|------------------------------------------------------------------------------------------------------------------------------------|
-| Pydantic AI vs LangChain  | Use Pydantic AI as the primary orchestration layer; adopt isolated LangChain tools only if a specific integration justifies it.    |
-| MCP vs headless REST      | Both: domain core first, REST/SSE for first-party UI, MCP for agents.                                                              |
-| Reddit official API       | Not an MVP dependency; keep future provider slot and pursue approval separately.                                                   |
-| Google Reddit partnership | Do not assume privileged Reddit content is exposed through Gemini API; benchmark public Search/URL Context behavior.               |
-| Final click in demo       | Preferred demo stops with exact approved text filled and final Reddit submit left to the human.                                    |
-| Workflow engine           | Start with Redis-backed workers; reevaluate Temporal/DBOS/Prefect only when durable, resumable workflows justify added complexity. |
-
-## Research references
-
-See the [research source catalog](../research/source-catalog.md) for the primary documentation and open-source repositories used during the initial design.
+See [Domain Model and State Machines](domain-model.md), [Reddit Retrieval Architecture](retrieval.md), [Typed LLM and Agent Design](agents.md), and [Implementation Roadmap](../roadmap/roadmap.md).

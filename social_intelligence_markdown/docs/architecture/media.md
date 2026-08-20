@@ -1,9 +1,9 @@
 # Higgsfield Media Integration
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Defines how generated image/video assets enter the same versioned review and approval lifecycle as text.
+Defines the expansion-stage Higgsfield integration and how generated image/video assets enter the same action-scoped approval lifecycle as text.
 
 ## Higgsfield integration
 
@@ -17,14 +17,16 @@ Defines how generated image/video assets enter the same versioned review and app
 
 5. Download completed assets into company-controlled object storage for retention.
 
-6. Associate assets with draft versions. Changing selected media after approval requires a new approval.
+6. Finalize each asset with an immutable SHA-256 and associate its provenance with the relevant Draft/Draft Version.
 
 
 > **Retention note.** Higgsfield documents generated outputs as available for at least seven days. Production should copy completed media to owned storage rather than treating provider URLs as durable assets.
 
 ## Media approval rule
 
-An approval must cover the selected media asset IDs/checksums as well as the text version. Replacing an image or video after approval invalidates that approval.
+An Approved Artifact stores the ordered media asset IDs and checksums along with the exact Draft Version, Actor Account, action, and Destination. Replacing, reordering, or mutating media requires a new Approval.
+
+Higgsfield is not a Retrieval Gate R0 or prototype vertical-slice dependency. Implement this integration only in the expansion milestone defined by the [roadmap](../roadmap/roadmap.md).
 
 See [ADR-008](../adr/008-higgsfield-as-media-provider.md).
 

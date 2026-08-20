@@ -1,68 +1,124 @@
 # Human Approval and Security
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Defines the outbound-action trust boundary, exact-content approval mechanism, browser safety model and core security controls.
+Human approval is a server-side authorization decision for one exact outbound action. It is not a prompt preference, client-supplied conversation state, Pydantic AI deferred-tool approval, or a mutable flag on a Draft.
+
+## Authorization model
+
+```text
+Human review
+    |
+    v
+Approval
+  human decision: who approved which DraftVersion and when
+    |
+    v
+ApprovedArtifact
+  immutable authorization snapshot and digest
+    |
+    v
+PublishPreparation
+  single-use, revalidated execution attempt
+    |
+    v
+READY_FOR_HUMAN
+  prototype stops before final submit
+```
+
+The Approved Artifact binds:
+
+```text
+DraftVersion and exact text SHA-256
++ ordered media asset IDs and SHA-256 values
++ action type
++ ActorAccount
++ exact Destination
++ approved_by and approved_at
++ expires_at and revocation state
++ max_uses = 1
+```
+
+Changing any bound value requires a new Approval and Approved Artifact.
+
+## Destination scope
+
+A Destination is platform-specific but fully resolved before approval. For a Reddit comment it includes:
+
+```json
+{
+  "platform": "reddit",
+  "subreddit": "cybersecurity",
+  "thread_id": "abc123",
+  "parent_comment_id": null
+}
+```
+
+The platform, community, thread, parent comment, action type, and Actor Account cannot be substituted during browser preparation.
+
+## Approval lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Discovered
-    Discovered --> Analyzed
-    Analyzed --> DraftReady
-    DraftReady --> AwaitingApproval
-    AwaitingApproval --> Rejected: reject
-    AwaitingApproval --> Approved: approve exact version
-    Approved --> AwaitingApproval: edit / regenerate
-    Approved --> Prepared: validated browser preparation
-    Prepared --> Posted: explicit approved publish path
-    Prepared --> [*]: preferred demo leaves final click to human
+    [*] --> Active: approve exact action scope
+    Active --> Revoked: human/system revocation
+    Active --> Expired: expires_at reached
+    Active --> Consumed: preparation atomically starts
+    Revoked --> [*]
+    Expired --> [*]
+    Consumed --> [*]
 ```
 
-## Human approval and publishing security
+- Approvals are short-lived and single-use by default. The default duration is configuration, but the expiry is explicit on every record.
+- Revocation is append-audited and immediately removes eligibility.
+- Consumption uses an atomic database transition. A failed browser attempt does not silently reset eligibility; an authorized retry policy must decide whether to resume the same preparation or require re-approval.
+- A changing conversation does not automatically mutate approval. Operators may revoke manually, and policy may require fresh review when source context has materially changed.
 
-Human approval is not a prompt-level preference. It is enforced by database state, authorization checks, content hashing, and tool separation.
+## Legal execution path
 
+1. A human edits or regenerates a Draft, producing a new immutable Draft Version.
+2. The review service validates the Draft Version, finalized media assets, Actor Account, Destination, action type, and expiry.
+3. One transaction records the Approval and immutable Approved Artifact.
+4. The publishing API accepts only `approval_id`.
+5. The publishing worker loads the artifact, revalidates ownership/status/expiry/revocation/use count and atomically consumes it.
+6. Browser preparation uses only the artifact snapshot and returns `READY_FOR_HUMAN`.
+7. In the preferred prototype, no callable capability performs final submit.
 
-```text
-DISCOVERED -> ANALYZED -> DRAFT_READY -> AWAITING_APPROVAL
-|
-reject | approve
-v
-APPROVED
-|
-publish job allowed
-v
-POSTED
-```
+## Controls
 
+| Control | Design |
+|---|---|
+| Immutable content | Draft Versions and finalized Media Assets cannot be modified. |
+| Complete scope | Artifact digest covers content, media, destination, Actor Account, and action type. |
+| No overrides | Publish Preparation has no fields for outbound text, media, destination, account, or action. |
+| Separated capabilities | Research and LLM-task workers receive no publishing credentials or publishing port. |
+| Human identity | Approval requires an authenticated, authorized human principal. |
+| Execution validation | Authorization is checked at request time and immediately before browser execution. |
+| Expiration/revocation | Inactive approvals fail closed with stable reason codes. |
+| Audit | Record decision, artifact digest, preparation evidence, state transitions, and final human handoff. |
 
-| **Control**                  | **Design**                                                                                                                 |
-|------------------------------|----------------------------------------------------------------------------------------------------------------------------|
-| Exact artifact approval      | Approval references draft_version_id and SHA-256 of the exact outbound text/media selection.                               |
-| Edit invalidation            | Any change after approval creates a new version and removes publish eligibility until re-approved.                         |
-| Separated workers            | Research worker cannot engage. Publishing worker accepts only approved artifact IDs, never arbitrary text.                 |
-| Authentication/authorization | Approval UI and sensitive APIs require authenticated user identity; model-level approval is not an authorization boundary. |
-| Audit                        | Record who approved, when, what content, destination, source opportunity, and later publish result.                        |
-| Safe demo mode               | CUA navigates and fills the composer, then stops before the final Reddit submit click.                                     |
+## Pydantic AI boundary
 
-## Security and privacy controls
+Pydantic AI deferred tools may pause an agent interaction and route work to a reviewer, but that mechanism is not the product authorization boundary. Neither deferred-tool results nor client-supplied model history can create Approval, Approved Artifact, or publish eligibility. Only the Review domain service may do so after authenticating the human and validating the complete action scope.
 
-| **Risk**                              | **Control**                                                                                                                                                                            |
-|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Prompt injection from web content     | Treat page text as untrusted data; constrain CUA task; Gemini Computer Use supports prompt-injection detection/safety features; never let page instructions redefine tool permissions. |
-| Credential leakage                    | Keep browser session secrets in dedicated secret storage/sandbox; do not expose cookies to model output or application logs.                                                           |
-| Unauthorized publishing               | No write tools in research agent; server-side approval validation; immutable content hash.                                                                                             |
-| Cross-tenant leakage                  | Workspace-scoped queries, authorization checks in domain service, and tenant keys in job payloads.                                                                                     |
-| Excessive retention of public content | Store only required excerpts/normalized data; configurable retention and deletion/re-fetch policy.                                                                                     |
-| Browser abuse / blocking              | Rate limits, conservative concurrency, human-like bounded navigation without stealth circumvention, and provider backoff.                                                              |
+## Browser and retrieval security
 
-## Security invariant
+| Risk | Control |
+|---|---|
+| Prompt injection from source content | Treat retrieved text as untrusted data; use fixed task instructions and typed outputs; never let page content expand capabilities. |
+| Credential leakage | Isolate browser sessions and external account credentials; redact logs and model telemetry. |
+| Access-control evasion | Stop on CAPTCHA, authentication gates, explicit blocks, and policy-classified rate limits; do not rotate proxies, fingerprints, sessions, or identities to bypass them. |
+| Cross-workspace leakage | Verify workspace ownership across Draft Version, media, Actor Account, Destination, Approval, and preparation. |
+| Excessive retention | Apply approved source-retention, deletion/tombstone, screenshot, prompt, and completion policies. |
 
-Approval is a server-side authorization fact, not an LLM conversation state. The publishing path must verify the approved draft version and content checksum at execution time. Research workers have no write capability.
+## Required invariant tests
 
-See [ADR-003](../adr/003-human-approval-exact-content-gate.md) and [ADR-007](../adr/007-human-final-submit-demo-mode.md).
+- Reject missing, expired, revoked, consumed, cross-workspace, or digest-mismatched artifacts.
+- Reject a one-character text change, different media ordering/checksum, different destination, different Actor Account, or different action type.
+- Reject all Publish Preparation request fields other than `approval_id` and idempotency metadata.
+- Prove two concurrent preparations cannot consume the same artifact.
+- Prove research/MCP/LLM-task paths cannot import or invoke the publishing capability.
+- Prove the prototype browser task has no final-submit action.
 
-## Research references
-
-See the [research source catalog](../research/source-catalog.md) for the primary documentation and open-source repositories used during the initial design.
+See [Domain Model and State Machines](domain-model.md), [REST and SSE API](../api/rest-api.md), [ADR-003](../adr/003-human-approval-exact-content-gate.md), [ADR-007](../adr/007-human-final-submit-demo-mode.md), and [ADR-010](../adr/010-separate-approval-from-approved-artifact.md).

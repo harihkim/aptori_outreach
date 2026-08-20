@@ -1,6 +1,6 @@
 # Reddit Access, Gemini and CUA Notes
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Captures the current assumptions that affect the MVP. These platform facts are time-sensitive and must be revalidated before production decisions.
@@ -22,4 +22,4 @@ There is no public Gemini API promise that developers inherit Google's private R
 
 ## Working conclusion
 
-For the MVP, benchmark a layered public retrieval path: Google Search grounding for discovery, URL Context for cheap retrieval where sufficient, and CUA browser sessions for bounded extraction/fallback. Do not assume Gemini exposes Google's private Reddit Data API access. Pursue official Reddit access as a separate workstream and plug it into the same `RedditProvider` contract when available.
+For Gate R0, compare Search discovery independently from known-thread fetching through URL Context, Crawlee HTTP/Playwright and bounded CUA. Keep CUA last rather than assuming it is the MVP default. Do not assume Gemini exposes Google's private Reddit Data API access. Pursue official Reddit access as a separate workstream and implement it through the capability-specific `RedditDiscoverySource` and `RedditThreadFetcher` ports when available.

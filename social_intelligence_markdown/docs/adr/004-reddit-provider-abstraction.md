@@ -1,34 +1,24 @@
-# ADR-004: Use a pluggable Reddit retrieval-provider abstraction
+# ADR-004: Separate Reddit discovery and thread-fetch provider ports
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
 
 ## Context
 
-Reddit developer/API approval is a separate process, while the MVP must demonstrate Reddit now. Browser/search behavior and platform access can also change. Coupling the opportunity engine to one retrieval technique would make the product brittle.
+Search providers discover URLs, while known-URL HTTP/browser adapters fetch threads; forcing both capabilities into one `RedditProvider` produces unsupported methods or hidden routing. Reddit access and provider behavior are also unstable enough to require independent benchmarking and provenance.
 
 ## Decision
 
-Define read-oriented `RedditProvider` capabilities for discovery, thread fetch and health checks. Keep publishing in a separate interface. Implement browser/search providers for the MVP and reserve a provider for approved official API access later.
+Define `RedditDiscoverySource` and `RedditThreadFetcher` ports, with routing/escalation in application code. Keep `RedditPublisher` separate in interface, credentials, and worker capability. If official access is approved, implement the async provider with Async PRAW and map SDK objects immediately into canonical schemas. Benchmark Search, URL Context, Crawlee HTTP/Playwright, and CUA independently before selecting defaults.
 
 ## Consequences
 
-### Positive
-
-- Retrieval methods can be benchmarked/swapped.
-- Official API access can be added without rewriting intelligence/UI layers.
-- Provider-specific failures and provenance are explicit.
-
-### Negative / trade-offs
-
-- Requires normalization and consistent provider contracts.
-- Some providers will expose different metadata/coverage.
-
-## Revisit when
-
-- Reddit offers a stable approved interface that fully covers requirements and is the clear long-term default.
+- Discovery quality and thread completeness can be measured separately.
+- Adapters implement only capabilities they genuinely provide.
+- Every attempt needs explicit provenance and failure semantics.
+- More routing composition is visible in application code, where policy belongs.
 
 ## Related documentation
 
-- [Reddit retrieval architecture](../architecture/retrieval.md)
-- [Retrieval benchmark](../research/retrieval-benchmark.md)
+- [Reddit Retrieval Architecture](../architecture/retrieval.md)
+- [Crawlee/PRAW research note](../research/crawlee-praw-asyncpraw.md)

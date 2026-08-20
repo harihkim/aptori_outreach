@@ -12,11 +12,12 @@ flowchart LR
     D --> N[Normalize & Deduplicate]
     N --> I[Intelligence / Scoring]
     I --> O[Opportunity Inbox]
-    O --> G[Draft / Content Generation]
+    O --> G[Draft / DraftVersion]
     G --> H[Human Review]
-    H -->|Approved exact artifact| P[Browser preparation / Publishing]
-    G --> M[Higgsfield Media]
-    M --> H
+    H --> A[Approval + ApprovedArtifact]
+    A --> P[Browser preparation]
+    G -. expansion .-> M[Higgsfield Media]
+    M -.-> H
 
     UI[SvelteKit UI] --> API[Headless Core]
     MCP[MCP clients] --> API
@@ -28,7 +29,7 @@ flowchart LR
 
 ## Non-negotiable invariant
 
-> No post, comment, message, vote, follow, or other outbound engagement may execute without an explicit human approval event for the exact artifact being sent. Edits invalidate approval.
+> No outbound preparation or engagement may execute without an explicit human Approval and immutable Approved Artifact binding exact content/media, Actor Account, action type, and Destination. Changes, expiry, revocation, or consumption remove eligibility.
 
 ## Documentation map
 
@@ -40,8 +41,9 @@ flowchart LR
 
 ### Architecture
 - [System design](architecture/system-design.md)
+- [Domain model and state machines](architecture/domain-model.md)
 - [Reddit retrieval](architecture/retrieval.md)
-- [AI / agent design](architecture/agents.md)
+- [Typed LLM / agent design](architecture/agents.md)
 - [Approval and security](architecture/approval-security.md)
 - [Data model](architecture/data-model.md)
 - [API and MCP architecture](architecture/api-and-mcp.md)
@@ -59,7 +61,9 @@ flowchart LR
 ### Research
 - [Open-source projects](research/open-source-projects.md)
 - [Reddit access, Gemini and CUA notes](research/reddit-access-and-gemini.md)
-- [Retrieval benchmark](research/retrieval-benchmark.md)
+- [Retrieval Gate R0](research/retrieval-benchmark.md)
+- [Pydantic AI capabilities](research/pydantic-ai-capabilities.md)
+- [Crawlee, PRAW and Async PRAW](research/crawlee-praw-asyncpraw.md)
 - [Research source catalog](research/source-catalog.md)
 
 ### Architecture Decision Records
@@ -75,9 +79,10 @@ flowchart LR
 | Frontend | Svelte 5 + SvelteKit + TypeScript |
 | UI | shadcn-svelte + Bits UI |
 | Frontend data | TanStack Query; Table/Virtual where useful |
-| Browser/computer use | CUA + Gemini Computer Use where appropriate |
-| Search/retrieval experiment | Gemini Google Search grounding + URL Context |
-| Media | Higgsfield API |
+| Retrieval experiments | Search/URL Context + Crawlee HTTP/Playwright + bounded CUA; select through R0 |
+| Official Reddit | Async PRAW after approved access |
+| Browser/computer use | CUA as a bounded last fallback and preparation adapter |
+| Media expansion | Higgsfield API |
 | Agent interface | MCP over the same domain services as REST/SSE |
 
 ## Documentation conventions
@@ -87,3 +92,4 @@ flowchart LR
 3. Public-platform capabilities and policy assumptions must be dated/revalidated before production decisions.
 4. Example schemas are illustrative until an OpenAPI/JSON Schema artifact is committed.
 5. Business logic lives in the headless core; UI, MCP, workers and providers are adapters around it.
+6. Canonical domain language is defined in the package [CONTEXT](../CONTEXT.md); use `Draft Version`, `Approval`, and `Approved Artifact` precisely.

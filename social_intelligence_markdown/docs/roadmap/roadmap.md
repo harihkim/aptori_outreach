@@ -1,60 +1,102 @@
 # Implementation Roadmap
 
-> **Status:** Draft v0.1  
+> **Status:** Draft v0.2
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Prioritizes a convincing Reddit-first demonstration while preserving the architecture needed for later connectors and production hardening.
+The plan has one funding gate and two product milestones. It intentionally avoids presenting optional expansion work as committed prototype scope.
 
-## Delivery strategy
+## R0: retrieval viability gate
 
-Optimize the first release around one compelling Reddit demonstration rather than shallow multi-platform breadth. Build the durable domain model and provider interfaces needed for future expansion, but spend implementation effort on discovery quality, opportunity ranking, review UX, and the human approval boundary.
+```text
+Freeze evaluation protocol, queries, corpus, labels, provider configs
+                              |
+                              v
+                 run matched provider variants
+                              |
+                              v
+                       R0 GO / NO-GO
+                         /        \
+                      PASS        FAIL
+                       |            |
+                       v            v
+               Vertical slice   Rework retrieval
+                                architecture or
+                                product premise
+```
 
+R0 deliverables:
 
-> Definition of done for the first demonstration
-> A campaign finds real Reddit conversations, ranks a small set of credible opportunities, explains each choice, drafts a useful response, routes the exact draft through human approval, prepares it in Reddit without auto-submitting, and turns at least one repeated market theme into original content plus a Higgsfield media asset.
+- frozen query set, known-thread corpus, labeling protocol, metrics, and thresholds;
+- benchmark adapters for Search, URL Context, Crawlee HTTP/Parsel, Crawlee Playwright, and CUA;
+- Async PRAW comparison only if approved Reddit credentials exist;
+- immutable Retrieval Observations and deterministic normalized `RedditThread` output;
+- dated result dataset and signed pass/fail report.
 
-## Indicative implementation roadmap
+R0 passes only under [the quantitative evaluation protocol](../research/retrieval-benchmark.md). A curated demo is not evidence of viability.
 
-| **Phase**               | **Outcome**                  | **Main deliverables**                                                                              | **Exit gate**                                                                           |
-|-------------------------|------------------------------|----------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| 0. Spike               | Prove retrieval paths.       | CUA sandbox, Gemini Search/URL Context experiments, normalized thread schema, benchmark harness.   | At least one reliable path retrieves recent Reddit posts + useful comment context.      |
-| 1. Core                | Headless domain foundation.  | FastAPI, PostgreSQL models/migrations, campaigns, discovery runs, conversations, audit/events.     | End-to-end ingest persists canonical conversations idempotently.                        |
-| 2. Intelligence        | Opportunity engine.          | Pydantic AI schemas, cheap filter, scoring, explanations, opportunity inbox API, labeled eval set. | Top results show acceptable precision on test campaigns.                                |
-| 3. Product UI          | Operational workflow.        | SvelteKit shell, Campaigns, Opportunities, Conversation detail, SSE job progress.                  | Operator can run discovery and triage without developer tools.                          |
-| 4. Creative + approval | Human-controlled engagement. | Drafting, versioning, edit/reject/approve, content hash, browser prepare flow.                     | No outbound preparation can occur without valid approval; edit invalidates approval.    |
-| 5. Content + media     | Trend-to-content workflow.   | Theme clustering, Content Studio, Higgsfield image/video job integration, asset storage.           | One theme produces an approved content package and media asset.                         |
-| 6. Agent interface     | MCP access.                  | High-level tools/resources/prompts over existing domain services.                                  | External MCP client can discover/analyze/draft/queue review without bypassing approval. |
-| 7. Bonus connectors    | Demonstrate extensibility.   | Optional HN/GitHub/RSS/X/LinkedIn research connector where feasible/appropriate.                   | At least one non-Reddit source uses the same normalized/intelligence pipeline.          |
+Domain/approval contract work may proceed alongside R0 because it does not depend on a retrieval winner. Do not fund Content Studio, Higgsfield integration, broad MCP, analytics, bonus connectors, or UI polish before R0 passes.
 
-## Suggested 6-week build sequence
+## Milestone 1: prototype vertical slice
 
-This is an indicative sequence, not a commitment. Parallelize frontend shell and retrieval benchmarking if two engineers are available.
+```text
+Campaign
+  -> real Reddit discovery
+  -> Retrieval Observations
+  -> normalized Conversations
+  -> dedupe
+  -> typed analysis
+  -> deterministic ranking
+  -> Opportunity Inbox
+  -> Conversation detail
+  -> Draft + immutable DraftVersion
+  -> edit/regenerate creates new DraftVersion
+  -> scoped Approval + ApprovedArtifact
+  -> CUA prepares exact Reddit composer
+  -> STOP: human owns final submit
+```
 
-| **Week** | **Focus**                 | **Deliverable**                                                                               |
-|----------|---------------------------|-----------------------------------------------------------------------------------------------|
-| 1        | Retrieval spike + schemas | CUA environment; Gemini Search/URL Context benchmark; normalized RedditThread; sample corpus. |
-| 2        | Backend core              | Campaign/discovery/conversation models, jobs, dedupe, audit, REST/SSE.                        |
-| 3        | Opportunity engine        | Pydantic AI analysis, scoring, eval harness, Opportunities API and early UI.                  |
-| 4        | Review workflow           | Conversation view, drafts, versions, exact-text approval, browser prepare flow.               |
-| 5        | Content + media           | Theme clustering, Content Studio, Higgsfield webhooks/assets, polish.                         |
-| 6        | MCP + demo hardening      | MCP interface, golden demo corpus/campaign, failure recovery, observability, rehearsal.       |
+### Required deliverables
 
-## Next engineering artifacts to create
+| Area | Deliverable | Exit evidence |
+|---|---|---|
+| Domain foundation | FastAPI, PostgreSQL schema/migrations, Campaigns, Discovery Runs, Retrieval Observations, Conversations, Opportunities, Drafts/Versions, Approval/Artifact, audit | Numbered invariants have database/service tests |
+| Retrieval | Only the R0-approved default tiers and explicit routing/failure behavior | Reproduces passing R0 configuration |
+| Intelligence | Pydantic AI-backed typed `analyze_conversation`, deterministic score, frozen labeled eval | Top results meet the accepted evaluation threshold |
+| UI | Campaign run, Opportunity Inbox, Conversation detail, Draft/version review, Approval, preparation progress | Operator completes the flow without developer tools |
+| Publishing preparation | Closed request by `approval_id`, atomic single-use validation, CUA fill, no final-submit capability | Security tests reject every scope override and replay |
+| MCP proof | `list_campaigns`, `search_opportunities`, `get_opportunity` | External MCP client reads the same canonical services |
+| Operations | Worker queue, SSE, correlated logs, model/retrieval provenance, failure recovery | Demonstrated retry/recovery without duplicate domain output |
 
-- OpenAPI schema and endpoint contracts for Campaigns, Opportunities, Drafts, Approvals, Media, and Events.
+### Prototype definition of done
 
-- SQLAlchemy models and Alembic migration plan based on the proposed data model.
+- R0 has passed with a versioned report.
+- A real campaign produces a small ranked set of explainable Opportunities.
+- Every model operation is a named, versioned, evaluated LLM Task.
+- Editing or regenerating creates a new Draft Version.
+- Approval binds exact content, media, destination, Actor Account, and action; it is expiring, revocable, and single-use.
+- Publish Preparation accepts no overrides and ends at `READY_FOR_HUMAN`.
+- The prototype exposes no callable final-submit path.
 
-- Pydantic schemas for RedditThread, ConversationAnalysis, Draft, Approval, and provider results.
+## Milestone 2: expansion
 
-- MCP tool/resource specification with JSON schemas and authorization requirements.
+Expansion is funded from evidence collected in the vertical slice:
 
-- Retrieval benchmark harness with a fixed query set and manual relevance labels.
+- trend clustering and Content Studio;
+- Higgsfield media generation and Media Studio;
+- broader MCP creative/review/analytics surface;
+- engagement and model-quality analytics;
+- approved official Reddit provider productionization and deletion/tombstone automation;
+- additional sources/connectors;
+- durable workflow engine only if long waits/replay/recovery justify it.
 
-- Threat model focused on browser sessions, prompt injection, approval bypass, and connector credentials.
+Each capability requires its own value, safety, and operating-cost acceptance criteria. “Architecturally possible” is not a roadmap commitment.
 
-- Figma or coded Svelte prototype for Overview, Opportunities, Conversation, and Approvals screens.
+## Immediate engineering sequence
 
-## Sequencing principle
+1. Create the `retrieval-eval/` frozen artifacts and run R0.
+2. Translate [Domain Model and State Machines](../architecture/domain-model.md) into Pydantic contracts and migration-ready persistence constraints.
+3. Translate [Human Approval and Security](../architecture/approval-security.md) into API schemas and invariant tests.
+4. If R0 passes, implement the vertical slice in order of the data flow above.
+5. Add the three-tool MCP proof after the corresponding read services exist.
 
-Do not start by implementing every provider or a general autonomous agent. First prove retrieval quality, normalization, opportunity scoring, human review and a single browser preparation path. Add MCP early enough to validate the headless boundary, but keep the UI as the primary review/control surface.
+Do not begin by implementing every provider or a general autonomous agent. The first proof is retrieval viability plus one safe, coherent end-to-end workflow.

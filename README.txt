@@ -1,5 +1,5 @@
 Social Intelligence & Engagement Copilot
-Documentation package - version 0.1 - 20 August 2026
+Documentation workspace - canonical Markdown version 0.2 - 20 August 2026
 
 Files
 -----
@@ -12,6 +12,9 @@ Files
 03_Roadmap_Demo_and_Research_Appendix.docx
   Implementation roadmap, demo script/fallbacks, retrieval benchmark, OSS research matrix, Reddit access risks, Google/Reddit clarification, production gates, and source catalog.
 
+social_intelligence_markdown/
+  Canonical, version-controlled specification. The DOCX files above are the original v0.1 stakeholder exports and are not the active source of truth.
+
 Core invariant
 --------------
-Nothing is posted automatically. All outbound content requires explicit human approval. The preferred first demo leaves the final Reddit submit click to the human.
+Nothing is posted automatically. Approval binds the complete outbound action: exact content/media, Actor Account, action type, and Destination. The preferred prototype leaves the final Reddit submit click to the human.

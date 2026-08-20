@@ -9,7 +9,7 @@ Even with an approval gate, the demonstration should make the human-control boun
 
 ## Decision
 
-After a human approves the exact draft, CUA may navigate to the Reddit thread and fill the composer with the approved content, but the preferred demo stops before clicking the final submit button. A later approved publishing path may be evaluated separately.
+After a human approves the complete outbound action and the server creates an immutable Approved Artifact, CUA may navigate to the bound Reddit Destination from the bound Actor Account and fill the composer with the exact approved content. The preferred prototype stops before clicking final submit. A later production-approved publishing path may be evaluated separately.
 
 ## Consequences
 
