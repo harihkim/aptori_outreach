@@ -1,6 +1,6 @@
 # PostgreSQL Data Model
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 PostgreSQL is the system of record. This is a persistence contract for the aggregate semantics and invariants in [Domain Model and State Machines](domain-model.md); large provider payloads and model outputs may use JSONB, while authorization-critical fields require queryable columns and constraints.
@@ -12,7 +12,7 @@ PostgreSQL is the system of record. This is a persistence contract for the aggre
 | Workspace | `id`, `name`, `settings` |
 | Campaign | `workspace_id`, `name`, `product_context`, `icp`, `keywords`, `subreddits`, `competitors`, `promotion_posture`, `status` |
 | DiscoveryRun | `campaign_id`, frozen query/config, provider plan, `started_at`, `completed_at`, metrics, `status` |
-| RetrievalObservation | `discovery_run_id`, provider/method/version, source/final URL, external source ID, `fetched_at`, result status, response metadata, raw artifact reference and SHA-256, extractor version, normalized SHA-256, completeness, failure reason |
+| RetrievalObservation | `discovery_run_id`, provider variant/method/version and config SHA-256, access-identity class and egress environment, source/final URL, external source ID, `fetched_at`, result status, response/rate metadata, attempt and network counters, billable-unit/cost breakdown, raw artifact reference and SHA-256, extractor version, normalized SHA-256, completeness, failure reason |
 | SourceItem | source, external ID/fullname, canonical URL, author, community, source timestamps, deletion/tombstone state, latest observed metadata |
 | Conversation | `root_source_item_id`, normalized content, content hash, `first_seen_at`, `last_seen_at` |
 | ConversationItem | `conversation_id`, `parent_id`, `source_item_id`, depth, normalized text, score |
@@ -60,6 +60,7 @@ Approval 1 ------ 1 ApprovedArtifact
 ## Evidence and retention
 
 - Keep immutable raw Retrieval Observations separate from mutable latest projections.
+- Preserve the frozen provider configuration or content-addressed reference needed to explain credentials class, Actor/build, proxy policy, rate/spend caps and runtime behavior without storing secrets in the observation.
 - Preserve provider, retrieval, model, prompt, schema, and normalization provenance so an Opportunity can be reconstructed.
 - Store full prompts/completions only under an explicit redaction and retention policy; hashes and structured outputs are the default evidence.
 - The Reddit integration must support refresh and tombstoning of content deleted at the source, in accordance with the approved access and retention posture.

@@ -1,6 +1,6 @@
 # Reddit Retrieval Architecture
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Retrieval is the product's primary technical uncertainty and must pass Retrieval Gate R0 before the vertical slice is funded. The architecture separates discovery from known-thread fetching because providers rarely support both capabilities equally well.
@@ -44,7 +44,9 @@ Search can discover URLs without fetching complete threads; Crawlee can fetch a 
 ```text
 RedditDiscoverySource
 ├── AsyncPrawDiscoverySource        approved Reddit Data API only
-├── SearchDiscoverySource           public URL discovery experiment
+├── SearchApiDiscoverySource        authenticated search API experiment
+├── SearchPageDiscoverySource       separately reviewed HTML/Lite experiment
+├── ApifyActorDiscoverySource       exact pinned Actor experiment only
 └── CuaDiscoverySource              bounded last fallback
 
 RedditThreadFetcher
@@ -52,17 +54,21 @@ RedditThreadFetcher
 ├── UrlContextThreadFetcher         current experiment
 ├── CrawleeHttpThreadFetcher        deterministic known-URL experiment
 ├── CrawleePlaywrightThreadFetcher  explicit browser experiment
+├── ApifyActorThreadFetcher         exact pinned Actor experiment only
+├── BrowserJsonThreadFetcher        isolated logged-in-browser experiment
 └── CuaThreadFetcher                semantic/UI last fallback
 ```
 
 Async PRAW adapters may share one internal read-only client and credential context, but SDK objects never escape into domain services. Synchronous PRAW is not the production choice for the async FastAPI/worker runtime.
+
+These names describe project-owned adapters, not permission to install a general-purpose CLI in a research worker. Each concrete search API, HTML surface, managed Actor, or browser-session mechanism is a distinct provider variant with its own version, identity class, policy posture, rate budget, cost model, and evidence.
 
 ## Escalation policy
 
 R0 compares methods rather than preselecting one winner. The intended production preference is:
 
 1. Use an approved official Reddit Data API path through Async PRAW where its coverage satisfies the task.
-2. Use an approved search provider for public URL discovery when official discovery is unavailable or insufficient.
+2. Use an approved, explicitly configured search provider for public URL discovery when official discovery is unavailable or insufficient.
 3. For known URLs, prefer the fastest compliant deterministic method meeting the completeness threshold: official API, URL Context, or Crawlee HTTP/Parsel according to measured results.
 4. Escalate a technically incomplete result to Crawlee Playwright only when browser rendering is permitted and necessary.
 5. Use CUA last for narrow cases requiring semantic visual navigation or irregular interaction.
@@ -73,11 +79,45 @@ Provider result classification controls escalation:
 |---|---|
 | `success` | Normalize and persist evidence. |
 | `incomplete` | May escalate to the next benchmark-approved method. |
-| `failed` | Retry only if classified transient and within budget; then optionally escalate. |
+| `upstream_unavailable` | Retry only within the bounded transient budget; then optionally escalate. |
+| `parse_failed` | Preserve the raw observation; retry only when deterministic and budgeted, otherwise optionally escalate. |
+| `failed` | Unexpected terminal failure; preserve the exact reason and do not silently collapse an access/policy outcome into this class. |
 | `blocked` | Stop and enter policy review; do not rotate around the block. |
 | `auth_required` | Stop; no bypass or credential guessing. |
+| `forbidden` | Stop; do not repeat with another identity or proxy. |
+| `policy_disallowed` | Stop before access and retain the policy decision as evidence. |
 | `rate_limited` | Respect backoff/admission control; do not switch identities to multiply quota. |
 | `not_found` | Record terminal observation; do not browser-hop for a hidden copy. |
+
+Fallback is policy-aware, not a reaction that conceals access denial. `incomplete` and exhausted transient `failed` results may move to another independently approved variant. A CAPTCHA, explicit block, authentication gate, forbidden response, or policy denial stops that route; a scheduled comparative benchmark may still run another pre-authorized variant independently.
+
+## Search and managed-provider variants
+
+- Brave's supported Search API is an authenticated adapter requiring its own subscription token and plan-aware rate handling; it is not part of a keyless fallback.
+- DuckDuckGo HTML and Lite are browser-facing search pages, not a documented full-search API contract. If evaluated, treat each as an experimental HTML-surface variant rather than a stable public endpoint.
+- An Apify integration must pin the exact Actor and build/version, structured input, output schema, proxy setting, token scope, timeout, item and spend caps, and dataset retrieval behavior. `APIFY_TOKEN` authenticates an account; it does not select an Actor, enable residential proxies, or guarantee yield.
+- Residential or rotating proxies do not authorize access and do not guarantee avoidance of blocks. They are disabled for Reddit access-control evasion.
+
+Every provider enforces admission centrally across worker processes. Rate and spend controls are scoped at least by provider, credential/subscription, workspace, and egress identity; adapters honor `Retry-After` and provider reset headers with bounded backoff and jitter.
+
+Telemetry distinguishes:
+
+```text
+domain job / query
+provider attempt
+top-level navigation or API call
+browser/network subrequest
+returned and deduplicated item
+provider billable unit, proxy byte, browser minute, and model call
+```
+
+Do not describe pages, screenshots, or fallback stages as total HTTP-request counts unless transport instrumentation proves that count.
+
+## Session-backed research variants
+
+Agent Reach is not a retrieval SDK and is not a production dependency. Its underlying OpenCLI route may be benchmarked as a distinct logged-in-browser JSON variant because it can expose structured Reddit search/thread responses without visual CUA. The benchmark must use an audited, pinned, project-owned read-only adapter in an isolated process; the full upstream CLI is write-capable and must not be exposed to the research worker.
+
+The `rdt-cli` cookie-authenticated web-JSON route is a higher-policy-risk diagnostic comparator only. Cookie copying, automatic browser-cookie extraction, browser-fingerprint impersonation, and anti-detection behavior are not eligible production mechanisms. Neither session-backed variant can satisfy R0's policy threshold without explicit access and commercial-use approval.
 
 ## Crawlee role
 
@@ -147,9 +187,10 @@ A CUA or Playwright task is narrow and read-only: open a known public URL or per
 
 - Installing a library grants no platform permission.
 - Benchmark discovery and thread fetching independently.
+- Treat every concrete Actor, API plan, HTML surface, browser-session transport, and credential class as a separately versioned provider variant.
 - Persist provenance, completeness, cost, latency, and explicit failure class.
 - Never convert an access denial into another evasion attempt.
 - Treat Google's Reddit relationship as unrelated to the product's own API access.
 - Select defaults by capability tier and quantitative evidence, not architectural preference.
 
-See [ADR-004](../adr/004-reddit-provider-abstraction.md), [ADR-009](../adr/009-retrieval-viability-gate-and-escalation.md), and the [Crawlee/PRAW research note](../research/crawlee-praw-asyncpraw.md).
+See [ADR-004](../adr/004-reddit-provider-abstraction.md), [ADR-009](../adr/009-retrieval-viability-gate-and-escalation.md), [ADR-011](../adr/011-isolate-session-backed-retrieval-experiments.md), the [Crawlee/PRAW research note](../research/crawlee-praw-asyncpraw.md), [Agent Reach assessment](../research/agent-reach.md), and [third-party scraping-claims assessment](../research/third-party-scraping-claims.md).

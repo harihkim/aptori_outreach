@@ -14,6 +14,7 @@ ADRs capture important architectural choices and their consequences. They comple
 | [008](008-higgsfield-as-media-provider.md) | Higgsfield as external media-generation provider | Accepted for expansion |
 | [009](009-retrieval-viability-gate-and-escalation.md) | Retrieval Gate R0 and deterministic escalation before CUA | Accepted |
 | [010](010-separate-approval-from-approved-artifact.md) | Separate Approval decision from Approved Artifact | Accepted |
+| [011](011-isolate-session-backed-retrieval-experiments.md) | Isolate session-backed retrieval experiments; reject Agent Reach as runtime boundary | Accepted |
 
 ## ADR lifecycle
 

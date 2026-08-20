@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 The plan has one funding gate and two product milestones. It intentionally avoids presenting optional expansion work as committed prototype scope.
@@ -27,9 +27,11 @@ Freeze evaluation protocol, queries, corpus, labels, provider configs
 R0 deliverables:
 
 - frozen query set, known-thread corpus, labeling protocol, metrics, and thresholds;
-- benchmark adapters for Search, URL Context, Crawlee HTTP/Parsel, Crawlee Playwright, and CUA;
+- benchmark adapters for separately versioned Search APIs, URL Context, Crawlee HTTP/Parsel, Crawlee Playwright, and CUA;
 - Async PRAW comparison only if approved Reddit credentials exist;
+- optional pinned Apify Actor or logged-in-browser JSON comparisons only after their credential, policy, supply-chain, write-capability and spend boundaries are frozen;
 - immutable Retrieval Observations and deterministic normalized `RedditThread` output;
+- provider-aware admission control plus separate counts for jobs, attempts, network activity, returned/deduplicated items and billable units;
 - dated result dataset and signed pass/fail report.
 
 R0 passes only under [the quantitative evaluation protocol](../research/retrieval-benchmark.md). A curated demo is not evidence of viability.
@@ -60,7 +62,7 @@ Campaign
 | Area | Deliverable | Exit evidence |
 |---|---|---|
 | Domain foundation | FastAPI, PostgreSQL schema/migrations, Campaigns, Discovery Runs, Retrieval Observations, Conversations, Opportunities, Drafts/Versions, Approval/Artifact, audit | Numbered invariants have database/service tests |
-| Retrieval | Only the R0-approved default tiers and explicit routing/failure behavior | Reproduces passing R0 configuration |
+| Retrieval | Only the R0-approved provider variants and explicit routing/failure behavior | Reproduces the exact passing configuration, credential class, rate/spend limits and evidence |
 | Intelligence | Pydantic AI-backed typed `analyze_conversation`, deterministic score, frozen labeled eval | Top results meet the accepted evaluation threshold |
 | UI | Campaign run, Opportunity Inbox, Conversation detail, Draft/version review, Approval, preparation progress | Operator completes the flow without developer tools |
 | Publishing preparation | Closed request by `approval_id`, atomic single-use validation, CUA fill, no final-submit capability | Security tests reject every scope override and replay |
@@ -93,10 +95,10 @@ Each capability requires its own value, safety, and operating-cost acceptance cr
 
 ## Immediate engineering sequence
 
-1. Create the `retrieval-eval/` frozen artifacts and run R0.
+1. Create the `retrieval-eval/` frozen artifacts, admit only reviewed provider variants, and run R0.
 2. Translate [Domain Model and State Machines](../architecture/domain-model.md) into Pydantic contracts and migration-ready persistence constraints.
 3. Translate [Human Approval and Security](../architecture/approval-security.md) into API schemas and invariant tests.
 4. If R0 passes, implement the vertical slice in order of the data flow above.
 5. Add the three-tool MCP proof after the corresponding read services exist.
 
-Do not begin by implementing every provider or a general autonomous agent. The first proof is retrieval viability plus one safe, coherent end-to-end workflow.
+Do not begin by implementing every provider, installing a general-purpose retrieval CLI into the worker, or building a general autonomous agent. The first proof is retrieval viability plus one safe, coherent end-to-end workflow.

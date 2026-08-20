@@ -64,6 +64,8 @@ flowchart LR
 - [Retrieval Gate R0](research/retrieval-benchmark.md)
 - [Pydantic AI capabilities](research/pydantic-ai-capabilities.md)
 - [Crawlee, PRAW and Async PRAW](research/crawlee-praw-asyncpraw.md)
+- [Agent Reach and session-backed Reddit retrieval](research/agent-reach.md)
+- [Third-party scraping architecture claims](research/third-party-scraping-claims.md)
 - [Research source catalog](research/source-catalog.md)
 
 ### Architecture Decision Records
@@ -79,7 +81,7 @@ flowchart LR
 | Frontend | Svelte 5 + SvelteKit + TypeScript |
 | UI | shadcn-svelte + Bits UI |
 | Frontend data | TanStack Query; Table/Virtual where useful |
-| Retrieval experiments | Search/URL Context + Crawlee HTTP/Playwright + bounded CUA; select through R0 |
+| Retrieval experiments | Versioned Search APIs/URL Context + Crawlee HTTP/Playwright + optional pinned managed/session-backed variants + bounded CUA; select through R0 |
 | Official Reddit | Async PRAW after approved access |
 | Browser/computer use | CUA as a bounded last fallback and preparation adapter |
 | Media expansion | Higgsfield API |

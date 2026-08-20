@@ -1,6 +1,6 @@
 # Workers, Observability, and Testing
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Long-running retrieval, model, browser, and later media work executes in workers with explicit capability boundaries, idempotent jobs, correlated telemetry, and frozen evaluation fixtures.
@@ -26,6 +26,7 @@ FastAPI `BackgroundTasks` is not suitable for browser sessions, multi-provider r
 retrieval worker
   has: discovery/fetch ports, evidence store
   lacks: review and publishing ports/credentials
+  never exposes: unrestricted shell, write-capable social CLI, browser-cookie extractor
 
 LLM Task worker
   has: Pydantic AI, read-only task dependencies
@@ -39,7 +40,8 @@ preparation worker
 ## Observability and evidence
 
 - Correlation IDs span request, application command, worker job, Retrieval Observation, Model Run, browser session, and external provider request.
-- Retrieval telemetry includes provider/method/version, status/failure class, completeness, latency, retries, bytes/browser time/model tokens, and cost.
+- Retrieval telemetry includes provider/method/version, access-identity class, egress environment, status/failure class, completeness, latency, retries, rate/reset headers, bytes/browser time/model tokens, and cost.
+- Counters distinguish domain jobs/queries, provider attempts, top-level API calls or navigations, browser/network subrequests, returned/normalized/deduplicated items, and provider billable units.
 - Model telemetry includes task/prompt/schema versions, requested/actual provider/model/settings, transport/output/tool retries, usage, estimated cost, and time to first/final output.
 - Approval telemetry records the human decision, artifact digest, expiry/revocation/consumption, and rejected override/replay attempts.
 - OpenTelemetry/Logfire may aid operations, but PostgreSQL/domain audit remains authoritative.
@@ -52,6 +54,9 @@ preparation worker
 - Discovery and known-thread metrics are computed independently.
 - Same raw observation replay produces identical normalized output.
 - Access denial never triggers proxy, fingerprint, session, or identity rotation.
+- Provider admission limits are coordinated across workers by provider, credential/subscription, workspace and egress identity; retry/reset handling stays within the frozen budget.
+- A managed-Actor test proves exact Actor/build/input/output/proxy/spend configuration; possession of a token cannot select defaults implicitly.
+- Session-backed experimental adapters expose only allowlisted read operations and fail the capability test if upstream write commands or automatic cookie extraction are reachable.
 - Report includes all variants, costs, and policy stops; no winner-only report.
 
 Detailed metrics and thresholds are in [Retrieval Gate R0](../research/retrieval-benchmark.md).

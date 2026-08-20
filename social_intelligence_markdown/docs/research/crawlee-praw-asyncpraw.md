@@ -3,7 +3,7 @@
 > **Status:** Research note
 > **Researched:** 2026-08-20
 > **Sources:** Official project repositories/documentation, PyPI metadata and Reddit policy/documentation only. Revalidate Reddit access and terms before implementation.
-> **Incorporated:** Canonical documentation v0.2.
+> **Incorporated:** Canonical retrieval architecture and R0 protocol; expanded in documentation v0.3.
 
 ## Conclusion
 

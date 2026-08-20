@@ -43,7 +43,7 @@ External references used during the initial product/architecture research. Verif
 
 **\[R18\]** [Harken GitHub](https://github.com/VladUZH/harken) - Multi-source social listening and themes; MIT.
 
-**\[R19\]** [Agent-Reach GitHub](https://github.com/Panniantong/agent-reach) - Multi-platform, multi-backend retrieval/router concepts.
+**\[R19\]** [Agent Reach GitHub](https://github.com/Panniantong/Agent-Reach) - Installer/doctor/skill router over upstream CLIs; reference engineering, not a production retrieval SDK.
 
 **\[R20\]** [Obscura GitHub](https://github.com/h4ckf0r0day/obscura) - Rust headless browser for scraping/agent automation.
 
@@ -66,3 +66,23 @@ External references used during the initial product/architecture research. Verif
 **\[R29\]** [Reddit Data API Wiki](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) - OAuth, User-Agent, rate-limit and deletion/retention guidance.
 
 **\[R30\]** [Reddit Data API Terms](https://redditinc.com/policies/data-api-terms) - Access, use, retention and control-circumvention constraints.
+
+**\[R31\]** [OpenCLI GitHub](https://github.com/jackwener/opencli) - Browser-extension/local-daemon CLI whose Reddit adapter uses logged-in browser-origin JSON endpoints and also exposes write operations.
+
+**\[R32\]** [`rdt-cli` GitHub](https://github.com/public-clis/rdt-cli) - Reverse-engineered cookie-authenticated Reddit web-JSON CLI; higher-policy-risk diagnostic reference.
+
+**\[R33\]** [Brave Search API authentication](https://api-dashboard.search.brave.com/documentation/guides/authentication) - Supported Brave Search API requests require a subscription token.
+
+**\[R34\]** [Brave Search API rate limiting](https://api-dashboard.search.brave.com/documentation/guides/rate-limiting) - Subscription-scoped limit, remaining and reset headers plus `429` behavior.
+
+**\[R35\]** [Apify - Run Actors](https://docs.apify.com/actors/running) - Actor selection, structured invocation, dataset retrieval and account billing behavior.
+
+**\[R36\]** [Apify - Actor input and output](https://docs.apify.com/actors/running/input-and-output) - Actor-specific input, build/runtime options, output schemas and storage locations.
+
+**\[R37\]** [Apify residential proxy](https://docs.apify.com/proxy/residential-proxy) - Explicit proxy configuration, traffic pricing, latency variation and connection interruptions.
+
+**\[R38\]** [Apify blocked-proxy guidance](https://docs.apify.com/academy/node-js/filter-blocked-requests-using-sessions) - Proxy pools can remain or become blocked; no proxy is guaranteed indefinitely.
+
+**\[R39\]** [Reddit User Agreement](https://redditinc.com/policies/user-agreement) - Current automated collection, crawling and scraping restrictions.
+
+**\[R40\]** [Reddit robots/crawler statement](https://redditinc.com/news/robot-txt-update) - Unknown crawlers may be rate-limited or blocked; technical reachability does not confer permission.

@@ -1,6 +1,6 @@
-# Typed LLM and Agent Design
+# Typed LLM Execution and Agent Design
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Pydantic AI is the default typed LLM execution layer for bounded extraction, classification, synthesis, evaluation support, and generation. Tool-using agents are one use case, not the organizing abstraction for every model call.

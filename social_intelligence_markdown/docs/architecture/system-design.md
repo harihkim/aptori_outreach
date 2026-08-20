@@ -1,6 +1,6 @@
 # System Design
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 The platform is headless-first, with a first-party SvelteKit application and an agent-native MCP adapter. Both call the same application/domain services and authorization rules; PostgreSQL is canonical state.
@@ -16,7 +16,8 @@ flowchart TB
     Q --> RW[Retrieval workers]
     Q --> LW[LLM Task workers]
     Q --> PW[Preparation worker]
-    RW --> SEARCH[Search / URL Context]
+    RW --> SEARCH[Versioned Search APIs / URL Context]
+    RW -. optional measured adapter .-> MANAGED[Pinned managed Actor]
     RW --> CRAWLEE[Crawlee HTTP / Playwright]
     RW --> CUA[CUA]
     RW -. approved access .-> APRAW[Async PRAW]
@@ -44,7 +45,7 @@ MCP is valuable for agent access, but campaign configuration, bulk triage, sourc
 | Typed LLM execution | Pydantic AI v2-compatible pinned range | Structured outputs, validation, tools when needed, limits, evals, telemetry |
 | Database | PostgreSQL + SQLAlchemy 2 + Alembic | Canonical state and authorization constraints |
 | Queue/cache | Redis + lightweight worker framework | Prototype jobs, retries, coordination; avoid Kafka initially |
-| Retrieval | R0-selected adapters behind discovery/fetch ports | Search, URL Context, Crawlee HTTP/Playwright, CUA compared quantitatively |
+| Retrieval | R0-selected adapters behind discovery/fetch ports | Each Search API/plan, URL Context, Crawlee HTTP/Playwright, optional pinned managed Actor, isolated browser-JSON experiment and CUA is a distinct measured variant |
 | Official Reddit | Async PRAW after approved access | Async structured provider; not an MVP dependency |
 | Media | Higgsfield API in expansion | Optional, outside vertical-slice critical path |
 | Object storage | S3-compatible | Immutable retrieval evidence and finalized media |
@@ -87,6 +88,8 @@ For the prototype, one application deployment plus capability-separated workers 
 | Pydantic AI | Default typed LLM execution layer, including non-agentic calls; application remains control plane |
 | Retrieval ports | Separate `RedditDiscoverySource` and `RedditThreadFetcher`; publishing stays separate |
 | Crawlee | Benchmark HTTP/Parsel and fixed Playwright tiers; no evasion configuration; transient storage only |
+| Search/managed providers | Authenticated APIs and exact Actor/build configurations only; tokens do not imply provider, proxy, yield or permission |
+| Agent Reach | Reference engineering only; do not adopt its installer/router or expose its write-capable upstream CLIs in production workers |
 | Reddit official API | Async PRAW implementation choice after approval; separate access/commercial-use workstream |
 | MCP | Three read tools in the vertical slice; broader surface later |
 | Final click | Preferred prototype stops with exact approved content ready and leaves submit to the human |

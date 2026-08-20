@@ -10,7 +10,7 @@ The Reddit-first premise depends on acquiring fresh relevant conversations with 
 
 ## Decision
 
-Make Retrieval Gate R0 a prerequisite to the prototype vertical slice. Freeze queries, known-thread corpus, labels, provider configurations, metrics, and pass thresholds before comparative runs. Select defaults independently for discovery and thread fetching. Prefer an approved official API or deterministic HTTP method when it meets completeness, then explicit Playwright, with CUA last for semantic/UI cases. A failed R0 returns the project to retrieval architecture or product-premise work rather than allowing compensating feature scope.
+Make Retrieval Gate R0 a prerequisite to the prototype vertical slice. Freeze queries, known-thread corpus, labels, exact provider/Actor/browser configurations, access-identity classes, rate/spend budgets, metrics, and pass thresholds before comparative runs. Select defaults independently for discovery and thread fetching. Prefer an approved official API or deterministic HTTP method when it meets completeness, then explicit Playwright, with CUA last for semantic/UI cases. Automatic escalation is allowed only for incomplete or exhausted transient failures; explicit blocks, CAPTCHAs, authentication gates and policy denials stop the route. A failed R0 returns the project to retrieval architecture or product-premise work rather than allowing compensating feature scope.
 
 ## Consequences
 
@@ -23,3 +23,4 @@ Make Retrieval Gate R0 a prerequisite to the prototype vertical slice. Freeze qu
 
 - [Retrieval Gate R0](../research/retrieval-benchmark.md)
 - [Implementation Roadmap](../roadmap/roadmap.md)
+- [ADR-011](011-isolate-session-backed-retrieval-experiments.md)

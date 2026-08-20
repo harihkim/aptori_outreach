@@ -3,7 +3,7 @@
 > **Status:** Research note
 > **Researched:** 2026-08-20
 > **Sources:** Official Pydantic AI documentation only. Revalidate before implementation because the framework is evolving.
-> **Incorporated:** Canonical documentation v0.2.
+> **Incorporated:** Canonical typed-LLM architecture and ADRs; reconfirmed for documentation v0.3.
 
 ## Conclusion
 

@@ -1,6 +1,6 @@
 # Product Specification
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 The product is a Reddit-first social intelligence and engagement copilot. It turns a campaign definition into a small, explainable Opportunity Inbox, then helps a human create and safely prepare a useful response. Retrieval viability is a prerequisite, not an assumed feature.
@@ -51,6 +51,7 @@ The differentiated value is deciding which conversations matter, why they matter
 
 - Autonomous posting, commenting, messaging, voting, following, or final submission.
 - High-volume scraping or bypass of access controls and safety mechanisms.
+- Treating a provider token, proxy pool, browser session, managed Actor or general-purpose CLI as permission or as a production retrieval contract.
 - A general-purpose autonomous marketing agent.
 - Content Studio, Higgsfield integration, broad analytics, or multi-platform breadth on the critical path.
 - Enterprise billing, complex RBAC, or an integration marketplace.
@@ -71,7 +72,7 @@ The differentiated value is deciding which conversations matter, why they matter
 |---|---|---|
 | FR-00 | Retrieval gate | Freeze and pass R0 before implementing the vertical slice beyond contracts/harnesses |
 | FR-01 | Campaign configuration | Capture product context, audience, keywords, communities, competitors, positioning, promotion posture, approved/prohibited claims |
-| FR-02 | Discovery | Use capability-specific sources and record every attempt as a Retrieval Observation |
+| FR-02 | Discovery | Use exact R0-approved provider variants and record every attempt, configuration identity and policy outcome as a Retrieval Observation |
 | FR-03 | Thread fetching | Use an explicit R0-approved fetcher tier and return typed success/incomplete/access/failure semantics |
 | FR-04 | Normalization/deduplication | Deterministically normalize immutable observations and deduplicate by source ID/URL before semantic analysis |
 | FR-05 | Typed analysis | Use versioned Pydantic AI LLM Tasks for semantic factors; compute overall score deterministically |
@@ -122,6 +123,8 @@ The differentiated value is deciding which conversations matter, why they matter
 | Discovery and thread fetching use separate provider ports | Committed architecture |
 | Async PRAW is the future approved official implementation; not an MVP dependency | Conditional on access |
 | Crawlee HTTP/Playwright and CUA are benchmark variants; CUA remains last fallback | Experimental until R0 |
+| Agent Reach is reference engineering only; session-backed routes require isolated read-only adapters | Committed security boundary |
+| Brave, DuckDuckGo-page and Apify Actor routes are separate configured benchmark variants, never a generic keyless/commercial switch | Experimental until R0 and policy review |
 | MCP begins as a three-tool read proof | Committed prototype scope |
 | Content Studio and Higgsfield are expansion | Deferred |
 

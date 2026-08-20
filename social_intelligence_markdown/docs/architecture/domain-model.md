@@ -1,6 +1,6 @@
 # Domain Model and State Machines
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 This document defines aggregate ownership, lifecycle, and cross-module invariants. The persistence inventory in [PostgreSQL Data Model](data-model.md) must implement these semantics rather than inventing alternate state transitions.
@@ -74,7 +74,7 @@ Conversation and Draft Version do not need mutable lifecycle machines. A Convers
 | INV-006 | A revoked, expired, or consumed Approval cannot authorize a Publish Preparation. |
 | INV-007 | The Publish Preparation API accepts only an Approval identifier, resolves its Approved Artifact internally, and accepts no content, destination, account, action, or media overrides. |
 | INV-008 | Approval consumption is atomic and `max_uses` is one by default. |
-| INV-009 | Research and LLM-task workers cannot create Publish Preparations or receive publishing credentials. |
+| INV-009 | Research and LLM-task workers cannot create Publish Preparations, receive publishing credentials, or invoke any external write/engagement action. |
 | INV-010 | Browser preparation cannot start without revalidating the Approved Artifact at execution time. |
 | INV-011 | The preferred prototype workflow cannot invoke final submit. |
 | INV-012 | Retrieval Observations are immutable evidence; normalization creates or updates canonical Conversations without overwriting that evidence. |
