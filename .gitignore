@@ -25,6 +25,7 @@ build/
 storage/
 *.log
 retrieval-eval/prototype-smoke/results/
+experiments/evidence/
 
 # Editor and operating-system files
 .DS_Store
