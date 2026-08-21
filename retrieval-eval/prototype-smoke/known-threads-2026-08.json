@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "frozenAt": "2026-08-21",
-  "selectionNote": "Ten public Reddit threads across six communities, ages, discussion shapes, and technical topics. Coverage intent is descriptive, not an expected-output label.",
+  "selectionNote": "Fourteen public Reddit threads across eight communities, ages, discussion shapes, and technical topics. Revision 2 adds four verified stress fixtures: locked, high-volume, negative-counter-delta, and exhausted-tree-with-deleted-comments shapes. Coverage intent and verification blocks are descriptive curation observations from 2026-08-21 via the authorized Obscura extractor path; they are not expected-output labels and will drift as live threads change.",
   "threads": [
     {
       "id": "t01-askrobotics-deep-self-post",
@@ -83,6 +83,81 @@
         "compliance_topic",
         "ordinary_thread"
       ]
+    },
+    {
+      "id": "t11-netsec-truecrypt-eol-high-volume",
+      "url": "https://www.reddit.com/r/netsec/comments/26pz9b/truecrypt_development_has_ended_052814/",
+      "coverageIntent": [
+        "high_volume_beyond_limit",
+        "deep_nesting",
+        "deleted_comments_present",
+        "intentionally_incomplete"
+      ],
+      "verification": {
+        "date": "2026-08-21",
+        "extractedComments": 457,
+        "reportedComments": 1362,
+        "counterDeltaClass": "exceeds_visible_tree",
+        "maxDepthObserved": 7,
+        "deletedComments": 153,
+        "unresolvedMoreNodes": 224
+      }
+    },
+    {
+      "id": "t12-cybersecurity-usaid-breach-locked",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/1ig9yoj/cybersecurity_breach_usaidgov/",
+      "coverageIntent": [
+        "locked_thread",
+        "deleted_comments_heavy",
+        "deep_nesting",
+        "near_complete_boundary"
+      ],
+      "verification": {
+        "date": "2026-08-21",
+        "extractedComments": 425,
+        "reportedComments": 455,
+        "counterDeltaClass": "exceeds_visible_tree",
+        "maxDepthObserved": 9,
+        "deletedComments": 83,
+        "unresolvedMoreNodes": 7
+      }
+    },
+    {
+      "id": "t13-netsec-sha1-collision-negative-counter",
+      "url": "https://www.reddit.com/r/netsec/comments/5vq9lr/announcing_the_first_sha1_collision/",
+      "coverageIntent": [
+        "archived_thread",
+        "negative_counter_delta_case",
+        "deleted_comments_present",
+        "near_complete_boundary"
+      ],
+      "verification": {
+        "date": "2026-08-21",
+        "extractedComments": 332,
+        "reportedComments": 321,
+        "counterDeltaClass": "negative_counter_lag",
+        "maxDepthObserved": 9,
+        "deletedComments": 81,
+        "unresolvedMoreNodes": 2
+      }
+    },
+    {
+      "id": "t14-cybersecurity-bills-twitter-hack-exhausted",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/hrvyx7/bill_gates_twitter_was_hacked/",
+      "coverageIntent": [
+        "exhausted_tree_with_deleted_comments",
+        "negative_counter_delta_case",
+        "archived_thread"
+      ],
+      "verification": {
+        "date": "2026-08-21",
+        "extractedComments": 326,
+        "reportedComments": 315,
+        "counterDeltaClass": "negative_counter_lag",
+        "maxDepthObserved": 9,
+        "deletedComments": 76,
+        "unresolvedMoreNodes": 0
+      }
     }
   ]
 }

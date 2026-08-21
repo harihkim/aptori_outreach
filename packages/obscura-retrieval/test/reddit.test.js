@@ -150,6 +150,31 @@ test('normalizes the comment tree and marks unresolved more nodes incomplete', (
     assert.match(result.normalizedContentSha256, /^[a-f0-9]{64}$/);
 });
 
+test('classifies the reported comment counter delta without overclaiming', () => {
+    const build = numComments => [
+        { data: { children: [{ kind: 't3', data: { id: 'p', name: 't3_p', title: 'T', author: 'a', score: 1, upvote_ratio: 1, subreddit_name_prefixed: 'r/x', num_comments: numComments, created_utc: 1, selftext: 'B', permalink: '/r/x/comments/p/t/', is_self: true } }] } },
+        { data: { children: [{ kind: 't1', data: { id: 'c', name: 't1_c', author: 'b', score: 1, depth: 0, parent_id: 't3_p', created_utc: 2, body: 'C', replies: '' } }] } },
+    ];
+    const withMore = payload => {
+        payload[1].data.children.push({
+            kind: 'more',
+            data: { id: 'm', parent_id: 't3_p', count: 5, children: ['u1', 'u2', 'u3', 'u4', 'u5'], depth: 0 },
+        });
+        return payload;
+    };
+
+    assert.equal(normalizeThread(build(1)).validation.counterDeltaClass, 'match');
+    assert.equal(normalizeThread(build(4)).validation.counterDeltaClass, 'exceeds_visible_tree');
+    assert.equal(normalizeThread(withMore(build(6))).validation.counterDeltaClass, 'within_unresolved_more');
+    assert.equal(normalizeThread(build(0)).validation.counterDeltaClass, 'negative_counter_lag');
+
+    const missingCounter = build(1);
+    delete missingCounter[0].data.children[0].data.num_comments;
+    const result = normalizeThread(missingCounter);
+    assert.equal(result.validation.reportedCommentDelta, null);
+    assert.equal(result.validation.counterDeltaClass, 'unknown');
+});
+
 test('content hash ignores volatile scores but full normalized hash does not', () => {
     const base = [
         { data: { children: [{ kind: 't3', data: { id: 'p', name: 't3_p', title: 'T', author: 'a', score: 1, upvote_ratio: 1, subreddit_name_prefixed: 'r/x', num_comments: 1, created_utc: 1, selftext: 'B', permalink: '/r/x/comments/p/t/', is_self: true } }] } },

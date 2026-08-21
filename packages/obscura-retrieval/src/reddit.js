@@ -140,6 +140,20 @@ function normalizeThread(payload) {
         .filter(comment => comment.parentId !== post.id && !idSet.has(comment.parentId))
         .map(comment => ({ id: comment.id, parentId: comment.parentId }));
 
+    const unresolvedMoreChildCount = unresolvedMore.reduce((sum, item) => sum + item.childIds.length, 0);
+    const reportedCommentDelta = post.totalReportedComments === null
+        ? null
+        : post.totalReportedComments - comments.length;
+    const counterDeltaClass = reportedCommentDelta === null
+        ? 'unknown'
+        : reportedCommentDelta === 0
+            ? 'match'
+            : reportedCommentDelta > 0 && unresolvedMoreChildCount >= reportedCommentDelta
+                ? 'within_unresolved_more'
+                : reportedCommentDelta > 0
+                    ? 'exceeds_visible_tree'
+                    : 'negative_counter_lag';
+
     const normalized = {
         post,
         comments,
@@ -151,8 +165,10 @@ function normalizeThread(payload) {
             missingParentReferences,
             maxDepth: comments.length ? Math.max(...comments.map(comment => comment.depth)) : null,
             unresolvedMoreNodeCount: unresolvedMore.length,
-            unresolvedMoreChildCount: unresolvedMore.reduce((sum, item) => sum + item.childIds.length, 0),
+            unresolvedMoreChildCount,
             sourceTreeExhausted: unresolvedMore.length === 0,
+            reportedCommentDelta,
+            counterDeltaClass,
         },
     };
 

@@ -64,13 +64,15 @@ Offline contract coverage is in [`obscura_deep_comment_extractor.test.js`](obscu
 
 ## Reproduce in WSL
 
+The Obscura binary now lives at the stable path `/home/hari/.local/bin/obscura` (SHA-256 `dbd8fd5147c1aeff30165c9d7884e777bcd630493bd83e20148fa57c71e91d94`, identical to the originally recorded scratch copy). Dependencies resolve from the retrieval package instead of IDE scratch space:
+
 ```bash
 cd /home/hari/myroot/intern_aptr/aptori_outreach
 
-NODE_PATH=/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/node_modules \
-OBSCURA_BIN=/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/obscura \
+OBSCURA_BIN=/home/hari/.local/bin/obscura \
 OBSCURA_PORT=9234 \
 OBSCURA_STEALTH=0 \
+NODE_PATH=$PWD/packages/obscura-retrieval/node_modules \
 /home/hari/.local/node-v20.18.0-linux-x64/bin/node \
 experiments/obscura_deep_comment_extractor.js
 ```
@@ -78,10 +80,18 @@ experiments/obscura_deep_comment_extractor.js
 Run the offline checks with:
 
 ```bash
-NODE_PATH=/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/node_modules \
 /home/hari/.local/node-v20.18.0-linux-x64/bin/node --test \
 experiments/obscura_deep_comment_extractor.test.js
 ```
+
+## Follow-up verification (2026-08-21)
+
+Seven additional threads were extracted with this runner to curate smoke-corpus revision 2. Two findings changed the tooling:
+
+1. **Sequential-run port race (fixed).** The runner SIGTERMed Obscura without awaiting exit, so the next run could hit `bind: address already in use` and fail before CDP ready. The teardown now waits for exit and escalates to SIGKILL, matching `ObscuraRuntime.stop()`.
+2. **Comment counter is unreliable in both directions.** Archived threads returned trees with *more* comments than `num_comments` reports (e.g. SHA-1 collision thread: 332 extracted vs 321 reported). Normalization now records `reportedCommentDelta` and a `counterDeltaClass` (`match`, `within_unresolved_more`, `exceeds_visible_tree`, `negative_counter_lag`, `unknown`) so completeness claims rest on `sourceTreeExhausted`, never on the counter.
+
+Verified shapes included locked (USAID breach), high-volume beyond limit (TrueCrypt EOL, 905-comment positive delta), exhausted-tree-with-deleted-comments, and deep nesting up to depth 9. These fixtures and observations are frozen in `retrieval-eval/prototype-smoke/known-threads-2026-08.json` (revision 2).
 
 ## What this proves—and what comes next
 

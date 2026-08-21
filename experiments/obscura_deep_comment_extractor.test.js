@@ -110,3 +110,65 @@ test('normalizes visible and deleted comments while preserving unresolved more n
     assert.deepEqual(result.validation.duplicateIds, []);
     assert.deepEqual(result.validation.missingParentReferences, []);
 });
+
+test('classifies the reported comment counter delta without overclaiming', () => {
+    const build = numComments => [
+        {
+            data: {
+                children: [{
+                    kind: 't3',
+                    data: {
+                        id: 'post',
+                        name: 't3_post',
+                        title: 'Example',
+                        author: 'op',
+                        score: 5,
+                        upvote_ratio: 0.9,
+                        subreddit_name_prefixed: 'r/example',
+                        num_comments: numComments,
+                        created_utc: 1_700_000_000,
+                        selftext: 'Body',
+                        permalink: '/r/example/comments/post/example/',
+                    },
+                }],
+            },
+        },
+        {
+            data: {
+                children: [{
+                    kind: 't1',
+                    data: {
+                        id: 'visible',
+                        name: 't1_visible',
+                        author: 'person',
+                        score: 2,
+                        depth: 0,
+                        parent_id: 't3_post',
+                        created_utc: 1_700_000_001,
+                        body: 'Visible reply',
+                        replies: '',
+                    },
+                }],
+            },
+        },
+    ];
+    const withMore = payload => {
+        payload[1].data.children.push({
+            kind: 'more',
+            data: { id: 'more_1', parent_id: 't3_post', count: 5, children: ['u1', 'u2', 'u3', 'u4', 'u5'], depth: 0 },
+        });
+        return payload;
+    };
+
+    assert.equal(normalizeThread(build(1)).validation.counterDeltaClass, 'match');
+    assert.equal(normalizeThread(build(4)).validation.counterDeltaClass, 'exceeds_visible_tree');
+    assert.equal(normalizeThread(withMore(build(6))).validation.counterDeltaClass, 'within_unresolved_more');
+    assert.equal(normalizeThread(build(0)).validation.counterDeltaClass, 'negative_counter_lag');
+
+    const missingCounter = build(1);
+    delete missingCounter[0].data.children[0].data.num_comments;
+    const result = normalizeThread(missingCounter);
+    assert.equal(result.post.totalReportedComments, undefined);
+    assert.equal(result.validation.reportedCommentDelta, null);
+    assert.equal(result.validation.counterDeltaClass, 'unknown');
+});

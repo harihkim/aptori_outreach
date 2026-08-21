@@ -5,14 +5,29 @@
  * identities, retry access-control failures, or submit Reddit actions.
  */
 
-const { chromium } = require('playwright-core');
 const { execFileSync, spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const DEFAULT_OBSCURA_BIN = '/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/obscura';
+const DEFAULT_OBSCURA_BIN = '/home/hari/.local/bin/obscura';
+
+function loadChromium() {
+    try {
+        return require('playwright-core').chromium;
+    } catch {
+        throw new Error("playwright-core is not resolvable. Run 'npm ci' in packages/obscura-retrieval and set NODE_PATH to packages/obscura-retrieval/node_modules.");
+    }
+}
+
+function playwrightCoreVersion() {
+    try {
+        return require('playwright-core/package.json').version;
+    } catch {
+        return null;
+    }
+}
 const OBSCURA_BIN = process.env.OBSCURA_BIN || DEFAULT_OBSCURA_BIN;
 const PORT = Number.parseInt(process.env.OBSCURA_PORT || '9230', 10);
 const TARGET_URL = process.env.TARGET_URL || 'https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/';
@@ -116,7 +131,7 @@ function startMemorySampler(obscuraPid) {
     };
 }
 
-async function connectOverCdpWithRetry(endpoint, processState, timeoutMs = 12_000) {
+async function connectOverCdpWithRetry(chromium, endpoint, processState, timeoutMs = 12_000) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {
@@ -152,6 +167,7 @@ function normalizeThread(data) {
         createdIso: new Date(postObj.created_utc * 1000).toISOString(),
         selftext: postObj.selftext,
         permalink: postObj.permalink,
+        locked: Boolean(postObj.locked),
     };
 
     const comments = [];
@@ -198,6 +214,20 @@ function normalizeThread(data) {
         .filter(comment => comment.parentId !== post.id && !idSet.has(comment.parentId))
         .map(comment => ({ id: comment.id, parentId: comment.parentId }));
 
+    const unresolvedMoreChildCount = unresolvedMore.reduce((sum, item) => sum + item.childIds.length, 0);
+    const reportedCommentDelta = Number.isFinite(post.totalReportedComments)
+        ? post.totalReportedComments - comments.length
+        : null;
+    const counterDeltaClass = reportedCommentDelta === null
+        ? 'unknown'
+        : reportedCommentDelta === 0
+            ? 'match'
+            : reportedCommentDelta > 0 && unresolvedMoreChildCount >= reportedCommentDelta
+                ? 'within_unresolved_more'
+                : reportedCommentDelta > 0
+                    ? 'exceeds_visible_tree'
+                    : 'negative_counter_lag';
+
     return {
         post,
         comments,
@@ -209,13 +239,16 @@ function normalizeThread(data) {
             missingParentReferences,
             maxDepth: comments.length ? Math.max(...comments.map(comment => comment.depth)) : null,
             unresolvedMoreNodeCount: unresolvedMore.length,
-            unresolvedMoreChildCount: unresolvedMore.reduce((sum, item) => sum + item.childIds.length, 0),
+            unresolvedMoreChildCount,
             sourceTreeExhausted: unresolvedMore.length === 0,
+            reportedCommentDelta,
+            counterDeltaClass,
         },
     };
 }
 
 async function extractCompleteRedditThread(url) {
+    const chromium = loadChromium();
     const runId = `obscura_${new Date().toISOString().replace(/[:.]/g, '-')}_${crypto.randomBytes(4).toString('hex')}`;
     const runDir = path.join(OUTPUT_ROOT, runId);
     fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
@@ -237,7 +270,7 @@ async function extractCompleteRedditThread(url) {
     const startedAt = Date.now();
 
     try {
-        browser = await connectOverCdpWithRetry(`http://127.0.0.1:${PORT}`, processState);
+        browser = await connectOverCdpWithRetry(chromium, `http://127.0.0.1:${PORT}`, processState);
         const context = browser.contexts()[0] || await browser.newContext();
         const page = context.pages()[0] || await context.newPage();
 
@@ -298,7 +331,7 @@ async function extractCompleteRedditThread(url) {
                 architecture: process.arch,
                 kernel: os.release(),
                 nodeVersion: process.version,
-                playwrightCoreVersion: require('playwright-core/package.json').version,
+                playwrightCoreVersion: playwrightCoreVersion(),
                 obscuraBinary: OBSCURA_BIN,
                 obscuraBinarySha256: sha256File(OBSCURA_BIN),
                 obscuraArguments: obscuraArgs,
@@ -329,7 +362,13 @@ async function extractCompleteRedditThread(url) {
         throw error;
     } finally {
         if (browser) await browser.close().catch(() => {});
-        if (obscuraProc.exitCode === null) obscuraProc.kill('SIGTERM');
+        if (obscuraProc.exitCode === null) {
+            obscuraProc.kill('SIGTERM');
+            const exited = new Promise(resolve => obscuraProc.once('exit', resolve));
+            await Promise.race([exited, sleep(2000)]);
+            if (obscuraProc.exitCode === null) obscuraProc.kill('SIGKILL');
+            await Promise.race([exited, sleep(1000)]);
+        }
     }
 }
 
