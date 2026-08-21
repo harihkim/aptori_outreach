@@ -1,0 +1,11 @@
+# Pyrefly configuration for the aptori backend.
+project-includes = ["app", "tests"]
+project-excludes = [".venv"]
+python-version = "3.12"
+
+# Pyrefly's defaults leave these off; enable them so pyrefly matches
+# the annotation discipline mypy --strict already enforces.
+[errors]
+unannotated-return = true
+unannotated-parameter = true
+implicit-any = true
