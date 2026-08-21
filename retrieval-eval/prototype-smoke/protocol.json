@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "evaluationId": "adr012-prototype-smoke-2026-08-v1",
+  "decision": "ADR-012",
+  "frozenAt": "2026-08-21",
+  "reviewDate": "2026-09-20",
+  "sourceRevisionPolicy": "Use the clean Git HEAD containing this protocol; every report records that commit SHA.",
+  "environment": "WSL",
+  "accessBoundary": {
+    "anonymous": true,
+    "standardObscuraOnly": true,
+    "accountsOrAuthenticatedSessions": false,
+    "captchaOrChallengeContinuation": false,
+    "stealth": false,
+    "residentialProxy": false,
+    "proxyRotation": false,
+    "identityRotation": false,
+    "automaticProviderFallback": false
+  },
+  "artifacts": {
+    "queries": "queries-2026-08.json",
+    "knownThreads": "known-threads-2026-08.json",
+    "discoveryConfig": "provider-configs/obscura-duckduckgo-lite.json",
+    "threadConfig": "provider-configs/obscura-reddit-thread.json"
+  },
+  "discoveryGate": {
+    "queryCount": 10,
+    "minimumQueriesWithCandidate": 8,
+    "candidateRequirement": "Every emitted candidate is a canonical Reddit thread URL.",
+    "failureRequirement": "Empty, blocked, parse, and transport outcomes remain explicit."
+  },
+  "threadGate": {
+    "threadCount": 10,
+    "runCount": 2,
+    "minimumSuccessfulThreadsPerRun": 8,
+    "successRequiresSourceTreeExhausted": true,
+    "maximumDuplicateCommentIds": 0,
+    "maximumMissingParentReferences": 0,
+    "unresolvedMoreStatus": "incomplete",
+    "replayHashMatch": "100%"
+  }
+}

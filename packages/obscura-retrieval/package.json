@@ -1,0 +1,17 @@
+{
+  "name": "@aptori/obscura-retrieval",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project-owned ADR-012 Obscura discovery and Reddit thread retrieval adapters",
+  "type": "commonjs",
+  "engines": {
+    "node": "20.18.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "smoke": "node bin/run-prototype-smoke.js"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

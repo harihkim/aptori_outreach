@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-08-21",
+  "selectionNote": "Ten public Reddit threads across six communities, ages, discussion shapes, and technical topics. Coverage intent is descriptive, not an expected-output label.",
+  "threads": [
+    {
+      "id": "t01-askrobotics-deep-self-post",
+      "url": "https://www.reddit.com/r/AskRobotics/comments/1uxx2bs/is_robotics_industry_broken/",
+      "coverageIntent": [
+        "self_post",
+        "deep_replies",
+        "recent"
+      ]
+    },
+    {
+      "id": "t02-cybersecurity-api-security",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/18lc63y/api_security/",
+      "coverageIntent": [
+        "ordinary_thread",
+        "security_topic"
+      ]
+    },
+    {
+      "id": "t03-cybersecurity-api-testing",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/123nfld/api_security_testing/",
+      "coverageIntent": [
+        "question_thread",
+        "older_thread"
+      ]
+    },
+    {
+      "id": "t04-devsecops-api-security",
+      "url": "https://www.reddit.com/r/devsecops/comments/1ddipac/api_security/",
+      "coverageIntent": [
+        "cross_community",
+        "vendor_discussion"
+      ]
+    },
+    {
+      "id": "t05-cybersecurity-scanner-recommendations",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/10mabr1/api_scanning_tool_recommendations/",
+      "coverageIntent": [
+        "solution_seeking",
+        "multi_product_discussion"
+      ]
+    },
+    {
+      "id": "t06-cybersecurity-api-assessment",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/raqibh/api_vulnerability_assessment_and_penetration/",
+      "coverageIntent": [
+        "older_thread",
+        "technical_question"
+      ]
+    },
+    {
+      "id": "t07-softwarearchitecture-api-keys",
+      "url": "https://www.reddit.com/r/softwarearchitecture/comments/zbnd0i/api_key_security_best_practices/",
+      "coverageIntent": [
+        "cross_community",
+        "architecture_topic"
+      ]
+    },
+    {
+      "id": "t08-googlecloud-unauthenticated-api",
+      "url": "https://www.reddit.com/r/googlecloud/comments/18sqsk2/how_can_i_secure_a_rest_api_without_requiring/",
+      "coverageIntent": [
+        "cloud_topic",
+        "question_thread"
+      ]
+    },
+    {
+      "id": "t09-springboot-api-authorization",
+      "url": "https://www.reddit.com/r/SpringBoot/comments/10e9u0x/how_do_you_guys_apply_api_securityauthorization/",
+      "coverageIntent": [
+        "framework_topic",
+        "question_thread"
+      ]
+    },
+    {
+      "id": "t10-cybersecurity-api-stig",
+      "url": "https://www.reddit.com/r/cybersecurity/comments/1bzwkgx/disa_stig_checklist_for_an_api/",
+      "coverageIntent": [
+        "compliance_topic",
+        "ordinary_thread"
+      ]
+    }
+  ]
+}

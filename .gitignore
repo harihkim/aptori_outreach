@@ -24,6 +24,7 @@ build/
 # Local crawler/runtime artifacts
 storage/
 *.log
+retrieval-eval/prototype-smoke/results/
 
 # Editor and operating-system files
 .DS_Store

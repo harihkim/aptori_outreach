@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "providerVariant": "obscura-duckduckgo-lite@2026-08-21",
+  "capability": "discovery",
+  "accessMode": "obscura_cdp_standard_anonymous",
+  "obscura": {
+    "version": "0.2.0",
+    "binaryPath": "/home/hari/.gemini/antigravity-ide/brain/97af282d-c646-4491-92a4-5745dadb63c0/scratch/obscura",
+    "binarySha256": "dbd8fd5147c1aeff30165c9d7884e777bcd630493bd83e20148fa57c71e91d94",
+    "stealth": false,
+    "proxy": null,
+    "storageDir": null,
+    "workers": 1,
+    "maxConnections": 1,
+    "startupTimeoutMs": 12000,
+    "navigationTimeoutMs": 35000
+  },
+  "runtime": {
+    "environment": "WSL",
+    "nodeVersion": "v20.18.0",
+    "playwrightCoreVersion": "1.62.1"
+  },
+  "discovery": {
+    "surface": "https://lite.duckduckgo.com/lite/",
+    "maxCandidates": 50,
+    "minimumGapMs": 2500,
+    "siteScope": "reddit.com thread URLs only",
+    "automaticFallback": false
+  }
+}

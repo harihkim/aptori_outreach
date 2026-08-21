@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-08-21",
+  "campaignContext": "Application and API security opportunity discovery",
+  "queries": [
+    {
+      "id": "q01-api-security-broad",
+      "pattern": "broad_high_noise",
+      "query": "API security",
+      "subreddits": []
+    },
+    {
+      "id": "q02-appsec-tools-broad",
+      "pattern": "broad_high_noise",
+      "query": "application security tools",
+      "subreddits": []
+    },
+    {
+      "id": "q03-sast-false-positives",
+      "pattern": "narrow_pain_point",
+      "query": "too many false positives from SAST",
+      "subreddits": []
+    },
+    {
+      "id": "q04-api-authorization-testing",
+      "pattern": "solution_seeking",
+      "query": "how to test authorization vulnerabilities in APIs",
+      "subreddits": []
+    },
+    {
+      "id": "q05-snyk-vs-semgrep",
+      "pattern": "competitor_comparison",
+      "query": "Snyk vs Semgrep",
+      "subreddits": []
+    },
+    {
+      "id": "q06-prevent-ssrf",
+      "pattern": "technical_question",
+      "query": "how to prevent SSRF in web applications",
+      "subreddits": []
+    },
+    {
+      "id": "q07-supply-chain-netsec",
+      "pattern": "subreddit_specific",
+      "query": "software supply chain security",
+      "subreddits": [
+        "netsec"
+      ]
+    },
+    {
+      "id": "q08-ai-code-security-2026",
+      "pattern": "recent_trending",
+      "query": "AI generated code security 2026",
+      "subreddits": []
+    },
+    {
+      "id": "q09-cicd-secrets",
+      "pattern": "solution_seeking",
+      "query": "secure CI CD pipeline secrets",
+      "subreddits": [
+        "devops"
+      ]
+    },
+    {
+      "id": "q10-remediation-backlog",
+      "pattern": "narrow_pain_point",
+      "query": "prioritizing vulnerability remediation backlog",
+      "subreddits": []
+    }
+  ]
+}
