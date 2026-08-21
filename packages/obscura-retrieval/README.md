@@ -9,7 +9,7 @@ It deliberately exposes no generic Obscura command runner. Runtime configuration
 
 ## Runtime
 
-The committed provider configs pin Obscura, Node.js, Playwright Core, access mode, timeouts, concurrency, and extraction settings. `OBSCURA_BIN` may relocate the binary only when its SHA-256 still matches the committed config.
+The committed provider configs pin Obscura, Node.js, Playwright Core, access mode, timeouts, concurrency, and extraction settings. The Obscura binary must live at the stable path `/home/hari/.local/bin/obscura`; `OBSCURA_BIN` may relocate it only when its SHA-256 still matches the committed config. Do not reference ephemeral tool-scratch locations in committed configs.
 
 ```bash
 PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm ci
