@@ -1,9 +1,9 @@
 # Implementation Roadmap
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-The plan has one funding gate and two product milestones. It intentionally avoids presenting optional expansion work as committed prototype scope.
+The plan has one long-term evidence gate, one dated internal-product exception, and two product milestones. It intentionally avoids presenting optional expansion work as committed prototype scope.
 
 ## R0: retrieval viability gate
 
@@ -19,7 +19,7 @@ Freeze evaluation protocol, queries, corpus, labels, provider configs
                       PASS        FAIL
                        |            |
                        v            v
-               Vertical slice   Rework retrieval
+             Graduate route    Rework retrieval
                                 architecture or
                                 product premise
 ```
@@ -34,9 +34,33 @@ R0 deliverables:
 - provider-aware admission control plus separate counts for jobs, attempts, network activity, returned/deduplicated items and billable units;
 - dated result dataset and signed pass/fail report.
 
-R0 passes only under [the quantitative evaluation protocol](../research/retrieval-benchmark.md). A curated demo is not evidence of viability.
+R0 passes only under [the quantitative evaluation protocol](../research/retrieval-benchmark.md). A curated demo or prototype smoke run is not evidence of viability. R0 remains the gate for graduating a provider beyond the time-box and for any future external use.
 
-Domain/approval contract work may proceed alongside R0 because it does not depend on a retrieval winner. Do not fund Content Studio, Higgsfield integration, broad MCP, analytics, bonus connectors, or UI polish before R0 passes.
+## ADR-012: time-boxed internal-product lane
+
+[ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md) authorizes the project team to build and polish the complete Internal Product through 2026-09-20 while full R0 continues. It provisionally selects Obscura + DuckDuckGo Lite for discovery and Obscura for known-thread retrieval. It does not declare R0 passed or authorize external users.
+
+```text
+Lock exact provisional configuration
+               |
+               +--------------------------+
+               |                          |
+               v                          v
+   Build vertical-slice services    Run frozen prototype smoke
+               |                          |
+               +-------------+------------+
+                             v
+                    Smoke pass required
+                 for retrieval increment
+                             |
+                             v
+              Internal Product delivery and polish
+                             |
+                             v
+                 Mandatory review 2026-09-20
+```
+
+Product scaffolding may begin immediately. The retrieval increment is not done until the ADR-012 smoke gate passes. Content Studio, Higgsfield integration, broad MCP, analytics, and bonus connectors remain expansion; product-quality UX for the vertical slice is allowed.
 
 ## Milestone 1: prototype vertical slice
 
@@ -62,7 +86,7 @@ Campaign
 | Area | Deliverable | Exit evidence |
 |---|---|---|
 | Domain foundation | FastAPI, PostgreSQL schema/migrations, Campaigns, Discovery Runs, Retrieval Observations, Conversations, Opportunities, Drafts/Versions, Approval/Artifact, audit | Numbered invariants have database/service tests |
-| Retrieval | Only the R0-approved provider variants and explicit routing/failure behavior | Reproduces the exact passing configuration, credential class, rate/spend limits and evidence |
+| Retrieval | Exact ADR-012 provisional variants for the Internal Product, or later R0-graduated variants, with explicit routing/failure behavior | Passes the frozen prototype smoke gate and reproduces the pinned configuration/evidence; provider graduation still requires R0 |
 | Intelligence | Pydantic AI-backed typed `analyze_conversation`, deterministic score, frozen labeled eval | Top results meet the accepted evaluation threshold |
 | UI | Campaign run, Opportunity Inbox, Conversation detail, Draft/version review, Approval, preparation progress | Operator completes the flow without developer tools |
 | Publishing preparation | Closed request by `approval_id`, atomic single-use validation, CUA fill, no final-submit capability | Security tests reject every scope override and replay |
@@ -71,7 +95,7 @@ Campaign
 
 ### Prototype definition of done
 
-- R0 has passed with a versioned report.
+- The ADR-012 prototype smoke gate has passed for the Internal Product, or R0 has passed with a versioned report.
 - A real campaign produces a small ranked set of explainable Opportunities.
 - Every model operation is a named, versioned, evaluated LLM Task.
 - Editing or regenerating creates a new Draft Version.
@@ -95,10 +119,11 @@ Each capability requires its own value, safety, and operating-cost acceptance cr
 
 ## Immediate engineering sequence
 
-1. Create the `retrieval-eval/` frozen artifacts, admit only reviewed provider variants, and run R0.
+1. Pin the ADR-012 Obscura and DuckDuckGo Lite runtime/configuration and freeze its discovery/thread smoke fixtures.
 2. Translate [Domain Model and State Machines](../architecture/domain-model.md) into Pydantic contracts and migration-ready persistence constraints.
 3. Translate [Human Approval and Security](../architecture/approval-security.md) into API schemas and invariant tests.
-4. If R0 passes, implement the vertical slice in order of the data flow above.
-5. Add the three-tool MCP proof after the corresponding read services exist.
+4. Implement the vertical slice in data-flow order while running the frozen prototype smoke; do not call the retrieval increment complete until it passes.
+5. Continue the full comparative R0 work needed for provider graduation and any future external use.
+6. Add the three-tool MCP proof after the corresponding read services exist.
 
-Do not begin by implementing every provider, installing a general-purpose retrieval CLI into the worker, or building a general autonomous agent. The first proof is retrieval viability plus one safe, coherent end-to-end workflow.
+Do not begin by implementing every provider, installing a general-purpose retrieval CLI into the worker, or building a general autonomous agent. The immediate proof is the exact provisional route plus one safe, coherent end-to-end workflow; full R0 remains a separate evidence obligation.

@@ -81,7 +81,7 @@ flowchart LR
 | Frontend | Svelte 5 + SvelteKit + TypeScript |
 | UI | shadcn-svelte + Bits UI |
 | Frontend data | TanStack Query; Table/Virtual where useful |
-| Retrieval experiments | Versioned Search APIs/URL Context + Crawlee HTTP/Playwright + optional pinned managed/session-backed variants + bounded CUA; select through R0 |
+| Retrieval | ADR-012 provisional Obscura + DuckDuckGo Lite discovery and Obscura thread fetching for the Internal Product; versioned alternatives and provider graduation through R0 |
 | Official Reddit | Async PRAW after approved access |
 | Browser/computer use | CUA as a bounded last fallback and preparation adapter |
 | Media expansion | Higgsfield API |

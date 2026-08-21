@@ -1,20 +1,23 @@
 # Reddit Retrieval Architecture
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-Retrieval is the product's primary technical uncertainty and must pass Retrieval Gate R0 before the vertical slice is funded. The architecture separates discovery from known-thread fetching because providers rarely support both capabilities equally well.
+Retrieval is the product's primary technical uncertainty. Full Retrieval Gate R0 remains required for provider graduation and any future external use. [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md) creates a dated exception allowing the project team to build the Internal Product with exact provisional variants after a smaller smoke gate. The architecture separates discovery from known-thread fetching because providers rarely support both capabilities equally well.
 
 ## Gate R0
 
 ```mermaid
 flowchart TD
     S[Retrieval viability spike] --> R0{R0 quantitative gate}
-    R0 -->|Pass| V[Build prototype vertical slice]
+    R0 -->|Pass| V[Graduate provider route]
     R0 -->|Fail| X[Rework retrieval architecture or product premise]
+    E[ADR-012 internal exception] --> S2[Prototype smoke gate]
+    S2 -->|Pass| I[Complete internal retrieval increment]
+    S2 -->|Fail| X2[Fix, change, or suspend provisional route]
 ```
 
-Before R0 passes, work may establish the domain/approval contracts and a minimal benchmark harness. Do not build Content Studio, Higgsfield integration, broad MCP, analytics, bonus connectors, or UI polish around an unproven acquisition path.
+Before R0 passes, ADR-012 permits vertical-slice implementation and product-level polish for team-only operation. Content Studio, Higgsfield integration, broad MCP, analytics, and bonus connectors remain deferred expansion.
 
 The frozen protocol and thresholds are defined in [Retrieval Gate R0](../research/retrieval-benchmark.md).
 
@@ -39,10 +42,28 @@ class RedditPublisher(Protocol):
 
 Search can discover URLs without fetching complete threads; Crawlee can fetch a known URL without implementing Reddit search. Separate ports prevent unsupported methods and keep escalation in application code. The publishing port remains separate in interface, credentials, process, and deployment permissions.
 
+## Provisional Internal Product route
+
+Through the ADR-012 review on 2026-09-20, the selected route is:
+
+```text
+Campaign query
+  -> ObscuraDuckDuckGoLiteDiscoverySource
+  -> canonical Reddit thread Candidate
+  -> ObscuraRedditThreadFetcher
+  -> immutable Retrieval Observation
+  -> deterministic normalization
+```
+
+Both adapters run behind project-owned narrow interfaces with pinned Obscura/browser/configuration identity and retained raw evidence. They use anonymous standard navigation only. Accounts or authenticated sessions, CAPTCHA continuation, stealth, residential proxies, proxy rotation, and identity rotation are not authorized. Passing the separate prototype smoke gate completes the internal retrieval increment but does not pass R0.
+
+No adapter silently hops to another provider. An operator may explicitly rerun Google, supported Brave Search API, Bing/Edge-index, or another separately configured variant; that run creates a distinct observation and preserves its own outcome.
+
 ## Candidate adapters
 
 ```text
 RedditDiscoverySource
+├── ObscuraDuckDuckGoLiteDiscoverySource  ADR-012 provisional internal default
 ├── AsyncPrawDiscoverySource        approved Reddit Data API only
 ├── SearchApiDiscoverySource        authenticated search API experiment
 ├── SearchPageDiscoverySource       separately reviewed HTML/Lite experiment
@@ -50,6 +71,7 @@ RedditDiscoverySource
 └── CuaDiscoverySource              bounded last fallback
 
 RedditThreadFetcher
+├── ObscuraRedditThreadFetcher      ADR-012 provisional internal default
 ├── AsyncPrawThreadFetcher          approved Reddit Data API only
 ├── UrlContextThreadFetcher         current experiment
 ├── CrawleeHttpThreadFetcher        deterministic known-URL experiment
@@ -65,7 +87,7 @@ These names describe project-owned adapters, not permission to install a general
 
 ## Escalation policy
 
-R0 compares methods rather than preselecting one winner. The intended production preference is:
+R0 compares methods rather than awarding the provisional choice automatic credit. The intended graduated-provider preference is:
 
 1. Use an approved official Reddit Data API path through Async PRAW where its coverage satisfies the task.
 2. Use an approved, explicitly configured search provider for public URL discovery when official discovery is unavailable or insufficient.
@@ -89,7 +111,7 @@ Provider result classification controls escalation:
 | `rate_limited` | Respect backoff/admission control; do not switch identities to multiply quota. |
 | `not_found` | Record terminal observation; do not browser-hop for a hidden copy. |
 
-Fallback is policy-aware, not a reaction that conceals access denial. `incomplete` and exhausted transient `failed` results may move to another independently approved variant. A CAPTCHA, explicit block, authentication gate, forbidden response, or policy denial stops that route; a scheduled comparative benchmark may still run another pre-authorized variant independently.
+Fallback is policy-aware, not a reaction that conceals access denial. Outside the ADR-012 internal route, `incomplete` and exhausted transient `failed` results may move to another independently approved variant. Under ADR-012 there is no automatic fallback: persist the outcome and require an explicit operator rerun of another configured variant. A CAPTCHA, explicit block, authentication gate, forbidden response, or policy denial always stops that route; a scheduled comparative benchmark may still run another pre-authorized variant independently.
 
 ## Search and managed-provider variants
 
@@ -191,6 +213,6 @@ A CUA or Playwright task is narrow and read-only: open a known public URL or per
 - Persist provenance, completeness, cost, latency, and explicit failure class.
 - Never convert an access denial into another evasion attempt.
 - Treat Google's Reddit relationship as unrelated to the product's own API access.
-- Select defaults by capability tier and quantitative evidence, not architectural preference.
+- Select durable defaults by capability tier and quantitative evidence; any earlier provisional choice must be explicit, dated, and reversible.
 
-See [ADR-004](../adr/004-reddit-provider-abstraction.md), [ADR-009](../adr/009-retrieval-viability-gate-and-escalation.md), [ADR-011](../adr/011-isolate-session-backed-retrieval-experiments.md), the [Crawlee/PRAW research note](../research/crawlee-praw-asyncpraw.md), [Agent Reach assessment](../research/agent-reach.md), and [third-party scraping-claims assessment](../research/third-party-scraping-claims.md).
+See [ADR-004](../adr/004-reddit-provider-abstraction.md), [ADR-009](../adr/009-retrieval-viability-gate-and-escalation.md), [ADR-011](../adr/011-isolate-session-backed-retrieval-experiments.md), [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md), the [Crawlee/PRAW research note](../research/crawlee-praw-asyncpraw.md), [Agent Reach assessment](../research/agent-reach.md), and [third-party scraping-claims assessment](../research/third-party-scraping-claims.md).

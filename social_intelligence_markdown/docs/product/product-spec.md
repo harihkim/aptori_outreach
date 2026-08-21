@@ -1,9 +1,9 @@
 # Product Specification
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-The product is a Reddit-first social intelligence and engagement copilot. It turns a campaign definition into a small, explainable Opportunity Inbox, then helps a human create and safely prepare a useful response. Retrieval viability is a prerequisite, not an assumed feature.
+The product is a Reddit-first social intelligence and engagement copilot. It turns a campaign definition into a small, explainable Opportunity Inbox, then helps a human create and safely prepare a useful response. Retrieval viability is not assumed: the Internal Product uses a dated provisional route while full R0 remains the graduation and external-use gate.
 
 ## Product thesis
 
@@ -18,7 +18,7 @@ The differentiated value is deciding which conversations matter, why they matter
 | Human authorization covers the exact action | Approval binds immutable text/media, Actor Account, action type, and Destination; edits or substitutions require approval again |
 | Helpful before promotional | Relevance can produce `monitor`, `do not respond`, or an expert-only response with no product mention |
 | Opportunity intelligence over monitoring | The default output is a ranked, explainable queue rather than keyword-result volume |
-| Retrieval viability before product breadth | The vertical slice starts only after the frozen R0 protocol passes |
+| Retrieval viability before product breadth | ADR-012 permits the team-only vertical slice after a frozen smoke gate; provider graduation and external use still require full R0 |
 | Deterministic control plane, typed LLM execution | Application code owns state, scoring, routing, retries, authorization, and persistence; Pydantic AI executes named bounded semantic tasks |
 | Headless core, bounded adapters | UI, REST, MCP, workers, and providers use the same domain services and cannot create alternate rules |
 | Evidence and provenance | Every Candidate, Conversation, Analysis, Draft Version, Approval, and preparation is reconstructable from versioned evidence |
@@ -34,7 +34,7 @@ The differentiated value is deciding which conversations matter, why they matter
 
 ### Prototype vertical slice
 
-- Configure a Campaign and run real Reddit discovery using only the R0-approved route.
+- Configure a Campaign and run real Reddit discovery using the exact ADR-012 provisional route, or a later R0-graduated route.
 - Reduce noisy Candidates to ranked, explainable Opportunities.
 - Generate, edit, and regenerate typed response candidates as immutable Draft Versions.
 - Capture scoped, expiring, revocable, single-use human authorization.
@@ -70,10 +70,10 @@ The differentiated value is deciding which conversations matter, why they matter
 
 | ID | Capability | Requirement |
 |---|---|---|
-| FR-00 | Retrieval gate | Freeze and pass R0 before implementing the vertical slice beyond contracts/harnesses |
+| FR-00 | Retrieval gate | For the Internal Product, freeze and pass the ADR-012 prototype smoke before completing the retrieval increment; pass full R0 before provider graduation or external use |
 | FR-01 | Campaign configuration | Capture product context, audience, keywords, communities, competitors, positioning, promotion posture, approved/prohibited claims |
-| FR-02 | Discovery | Use exact R0-approved provider variants and record every attempt, configuration identity and policy outcome as a Retrieval Observation |
-| FR-03 | Thread fetching | Use an explicit R0-approved fetcher tier and return typed success/incomplete/access/failure semantics |
+| FR-02 | Discovery | Use the exact ADR-012 provisional or R0-graduated provider variant and record every attempt, configuration identity, and policy outcome as a Retrieval Observation |
+| FR-03 | Thread fetching | Use the exact ADR-012 provisional or R0-graduated fetcher variant and return typed success/incomplete/access/failure semantics |
 | FR-04 | Normalization/deduplication | Deterministically normalize immutable observations and deduplicate by source ID/URL before semantic analysis |
 | FR-05 | Typed analysis | Use versioned Pydantic AI LLM Tasks for semantic factors; compute overall score deterministically |
 | FR-06 | Opportunity Inbox | Rank, filter, search, dismiss, save, and inspect Opportunities with evidence and rationale |
@@ -88,7 +88,8 @@ The differentiated value is deciding which conversations matter, why they matter
 
 | Metric | Purpose |
 |---|---|
-| R0 pass/fail | Proves the acquisition premise before product investment |
+| ADR-012 smoke pass/fail | Determines whether the provisional route can complete the internal retrieval increment |
+| R0 pass/fail | Determines whether a provider route graduates beyond the time-box or can support future external use |
 | Precision@5/10 and NDCG@10 | Measures discovery/ranking usefulness |
 | Cost/useful opportunity surfaced | Measures retrieval economics |
 | Known-thread completeness | Measures whether analysis has enough source context |
@@ -100,7 +101,7 @@ The differentiated value is deciding which conversations matter, why they matter
 
 ## Prototype acceptance criteria
 
-- R0 passes under the committed frozen evaluation protocol.
+- The ADR-012 prototype smoke passes for the Internal Product, or R0 passes under the committed frozen evaluation protocol.
 - A user configures a Campaign and runs the measured real Reddit route end to end.
 - Every retrieval attempt has immutable provenance and every Conversation can be reconstructed.
 - The Opportunity Inbox meets the accepted quality threshold and explains each recommendation.
@@ -115,7 +116,8 @@ The differentiated value is deciding which conversations matter, why they matter
 
 | Decision | Status |
 |---|---|
-| Reddit-first product premise must pass R0 | Committed gate |
+| ADR-012 provisionally selects Obscura + DuckDuckGo Lite discovery and Obscura thread fetching for the Internal Product through 2026-09-20 | Committed time-boxed exception |
+| Provider graduation and any future external use must pass R0 | Committed gate |
 | No automatic outbound engagement or final submit in prototype | Committed |
 | Draft and Draft Version are distinct; versions are immutable | Committed |
 | Approval and Approved Artifact are distinct; authorization binds the complete action | Committed |
@@ -128,4 +130,4 @@ The differentiated value is deciding which conversations matter, why they matter
 | MCP begins as a three-tool read proof | Committed prototype scope |
 | Content Studio and Higgsfield are expansion | Deferred |
 
-See [Implementation Roadmap](../roadmap/roadmap.md), [Domain Model and State Machines](../architecture/domain-model.md), and [Retrieval Gate R0](../research/retrieval-benchmark.md).
+See [Implementation Roadmap](../roadmap/roadmap.md), [Domain Model and State Machines](../architecture/domain-model.md), [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md), and [Retrieval Gate R0](../research/retrieval-benchmark.md).

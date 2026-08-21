@@ -1,9 +1,9 @@
 # Production Readiness and Risk Register
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-R0 authorizes only the measured prototype route. Production use requires separate evidence for access, scale, retention, model behavior, authorization, and recovery.
+ADR-012 authorizes only a time-boxed, project-team-operated Internal Product and does not satisfy R0. An R0 pass graduates only the measured retrieval route. External or production use still requires separate evidence for access, scale, retention, model behavior, authorization, and recovery.
 
 ## Main risks and mitigations
 
@@ -70,4 +70,4 @@ R0 authorizes only the measured prototype route. Production use requires separat
 - Jobs have bounded retries, dead-letter/manual recovery, idempotency, and reconciliation.
 - Backups and restoration include authorization/audit evidence without reviving expired/revoked credentials or work.
 
-See [Retrieval Gate R0](../research/retrieval-benchmark.md), [Human Approval and Security](../architecture/approval-security.md), and [Workers, Observability, and Testing](../architecture/workers-observability-testing.md).
+See [Retrieval Gate R0](../research/retrieval-benchmark.md), [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md), [Human Approval and Security](../architecture/approval-security.md), and [Workers, Observability, and Testing](../architecture/workers-observability-testing.md).

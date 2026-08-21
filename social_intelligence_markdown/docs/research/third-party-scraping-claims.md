@@ -1,9 +1,9 @@
 # Assessment of Third-Party Scraping Architecture Claims
 
 > **Status:** Research note
-> **Last updated:** 2026-08-20
+> **Last updated:** 2026-08-21
 > **Scope:** Fact-check of a quoted architecture description; the referenced third-party repository and runtime evidence were not provided
-> **Incorporated:** Canonical retrieval controls, R0 accounting and production-readiness gates in documentation v0.3.
+> **Incorporated:** Canonical retrieval controls, ADR-012's internal exception, R0 accounting, and production-readiness gates in documentation v0.4.
 
 ## Verdict
 
@@ -103,4 +103,4 @@ Keep the other platform as a benchmark inspiration, not an authority. For Gate R
 - **Adopt:** bounded workloads, deduplication, truthful typed failures, scheduled low-burst execution, and policy-aware fallback only for separately authorized capability or availability gaps.
 - **Benchmark:** residential versus datacenter execution, provider-specific pacing, recovery distributions, and exact cost per useful opportunity.
 - **Reject as contracts:** universal 2.2-second safety, 30–60-minute recovery, keyless Brave API access, token-only Apify scaling, complete block bypass, and zero ban risk.
-- **Require before use:** repository/source revision, executable tests, provider policy review, raw run evidence, and R0 results.
+- **Require before any adoption:** repository/source revision, executable tests, provider policy review, and raw run evidence. Full R0 remains required for provider graduation or external use; ADR-012's smaller smoke gate applies only to its named provisional internal variants.

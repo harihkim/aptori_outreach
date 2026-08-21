@@ -1,6 +1,6 @@
 # Workers, Observability, and Testing
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Long-running retrieval, model, browser, and later media work executes in workers with explicit capability boundaries, idempotent jobs, correlated telemetry, and frozen evaluation fixtures.
@@ -60,6 +60,19 @@ preparation worker
 - Report includes all variants, costs, and policy stops; no winner-only report.
 
 Detailed metrics and thresholds are in [Retrieval Gate R0](../research/retrieval-benchmark.md).
+
+## ADR-012 prototype smoke tests
+
+- Freeze 10 representative discovery queries, 10 varied known threads, and the exact Obscura/browser/extractor configuration before scoring.
+- Discovery returns at least one canonical Reddit thread candidate for at least 8 of 10 queries; every emitted candidate is a valid canonical thread URL.
+- Run the known-thread corpus twice; at least 8 of 10 threads succeed in each run.
+- Successful normalized trees contain no duplicate comments and no missing parent references.
+- Any unresolved Reddit `more` node forces `INCOMPLETE` rather than `COMPLETE`.
+- Same retained raw evidence and extractor version produce the identical normalized hash.
+- Empty results, blocks, parse failures, and transport failures remain explicit; no automatic provider hopping occurs.
+- Capability tests reject accounts/sessions, CAPTCHA continuation, stealth, residential proxies, proxy rotation, and identity rotation.
+
+Passing these tests completes the provisional internal retrieval increment only. It does not satisfy R0. Three consecutive frozen batches below 80% sufficiently complete thread-fetch success, material runtime drift, or any forbidden access requirement automatically suspends the provisional route.
 
 ## LLM Task tests
 

@@ -1,6 +1,6 @@
 # Open-Source Projects to Study or Reuse
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Projects identified during research, with a deliberate distinction between architecture inspiration, reusable components and production dependencies.
@@ -18,7 +18,7 @@ Projects identified during research, with a deliberate distinction between archi
 | RedditRadar                | Dashboard, AI analysis, lead states, campaign/settings concepts.                             | Study UI/data-model ideas; its unauthenticated JSON approach is not a long-term provider assumption. |
 | Harken                     | Multi-source social listening, normalization, sentiment/themes.                              | Study for future connector model and topic analytics.                                                |
 | Agent-Reach                | Installer/doctor/skill router over upstream CLIs, including logged-in browser/cookie Reddit routes. | Study ordered backends and conservative diagnostics; do not adopt as the production provider or run its write-capable CLIs unrestricted. |
-| Obscura                    | Rust headless browser and scraping/agent automation infrastructure.                          | Useful generic web/browser reference; not required in Reddit-first critical path if CUA works.       |
+| Obscura                    | Rust headless browser and scraping/agent automation infrastructure.                          | ADR-012 provisional runtime for DuckDuckGo Lite discovery and known-thread fetching behind narrow project-owned adapters; re-evaluate on 2026-09-20 and measure in R0. |
 | Postiz                     | Open-source multi-network scheduling/publishing and agent CLI.                               | Future publishing/integration study; review AGPL/license implications before embedding.              |
 | reddit-mcp-server projects | Typed read-only Reddit tools without full product UI.                                        | Study MCP tool shapes; do not make this architecture the system of record.                           |
 
@@ -27,7 +27,7 @@ Projects identified during research, with a deliberate distinction between archi
 | **Capability**                       | **Approach**                                                                                                                 |
 |--------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
 | Core data model / opportunity engine | Build. This is the differentiated product and must be designed around our scoring, audit, approval, and multi-source future. |
-| Reddit known-URL retrieval           | Benchmark URL Context, Crawlee HTTP/Playwright and bounded CUA independently; adopt only R0-winning tiers.                    |
+| Reddit known-URL retrieval           | Use the ADR-012 Obscura fetcher provisionally for the Internal Product after its smoke gate; benchmark it with URL Context, Crawlee HTTP/Playwright, and bounded CUA for R0 graduation. |
 | Official Reddit provider             | Implement with Async PRAW once Reddit access and the intended use are approved.                                               |
 | Typed LLM execution                  | Standardize on a small Pydantic AI-backed LLM Task boundary; keep state, scoring, authorization and persistence in the app.  |
 | Social-listening abstraction         | Study OpenMagpie/Harken; use Agent Reach only as reference engineering for routing/diagnostics, not as a runtime boundary.   |

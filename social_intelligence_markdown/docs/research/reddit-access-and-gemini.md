@@ -1,6 +1,6 @@
 # Reddit Access, Gemini and CUA Notes
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 Captures the current assumptions that affect the MVP. These platform facts are time-sensitive and must be revalidated before production decisions.
@@ -32,8 +32,8 @@ The observations worth carrying forward are:
 - In one controlled known-URL comparison, URL Context reported a Reddit bot challenge while Google Search grounding surfaced the core post content. URL Context remains a benchmark variant, not a mandatory stage.
 - Direct retrieval observed inside ChatGPT does not prove identical access from the public OpenAI Responses API or from this project's network. OpenAI web search must be benchmarked as its own public-API variant.
 
-R0 therefore needs age-bucket freshness metrics, exact-permalink recovery, grounding-source validation, post/comment completeness, and provider-specific failure evidence. Search-grounded partial content may support cheap screening, but high-value opportunities require the R0-approved deep-read route before drafting or review.
+R0 therefore needs age-bucket freshness metrics, exact-permalink recovery, grounding-source validation, post/comment completeness, and provider-specific failure evidence. Search-grounded partial content may support cheap screening, but high-value opportunities require a sufficiently complete deep read before drafting or review: the smoke-passed ADR-012 Obscura fetcher for the Internal Product, or an R0-graduated fetcher beyond that time-box.
 
 ## Working conclusion
 
-For Gate R0, compare Gemini Google Search, the public OpenAI web-search API, and other approved search APIs independently from known-thread fetching through URL Context, Crawlee HTTP/Playwright, isolated browser-JSON experiments, and bounded CUA. Keep CUA last rather than assuming it is the MVP default. Do not assume Gemini or OpenAI API customers inherit either company's private Reddit partnership access. Pursue official Reddit access as a separate workstream and implement it through the capability-specific `RedditDiscoverySource` and `RedditThreadFetcher` ports when available.
+For Gate R0, compare the ADR-012 Obscura variants, Gemini Google Search, the public OpenAI web-search API, and other approved search APIs independently from known-thread fetching through URL Context, Crawlee HTTP/Playwright, isolated browser-JSON experiments, and bounded CUA. ADR-012 provisionally selects Obscura + DuckDuckGo Lite discovery and Obscura known-thread fetching for the Internal Product; it gives them no automatic R0 credit. Keep CUA last rather than assuming it is the MVP default. Do not assume Gemini or OpenAI API customers inherit either company's private Reddit partnership access. Pursue official Reddit access as a separate workstream and implement it through the capability-specific `RedditDiscoverySource` and `RedditThreadFetcher` ports when available.

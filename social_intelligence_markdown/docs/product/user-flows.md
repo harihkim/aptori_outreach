@@ -1,6 +1,6 @@
 # User Flows and UX
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 The prototype operating flow runs from Campaign definition to an exact, human-authorized Reddit composer preparation. Content/media workflows are expansion.
@@ -13,7 +13,7 @@ The prototype operating flow runs from Campaign definition to an exact, human-au
 2. Add keywords, pain points, competitor names, product capabilities, and optional subreddits.
 3. Set promotion posture: expertise-first, balanced, or high-intent-only product mentions.
 4. Provide approved facts/claims and prohibited claims.
-5. Choose lookback/cadence within the R0-approved retrieval configuration.
+5. Choose lookback/cadence within the exact ADR-012 provisional configuration or a later R0-graduated configuration.
 
 ### Discover and triage
 

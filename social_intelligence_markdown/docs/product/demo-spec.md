@@ -1,13 +1,13 @@
 # Reddit-First Prototype Demo
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-The required demo proves the R0-approved Reddit acquisition path, opportunity intelligence, immutable drafting, complete human authorization, and browser handoff. Other networks, trend-to-content, and Higgsfield are optional expansion moments.
+The required internal demo proves the exact ADR-012 provisional Reddit route (or a later R0-graduated route), opportunity intelligence, immutable drafting, complete human authorization, and browser handoff. Other networks, trend-to-content, and Higgsfield are optional expansion moments.
 
 ## Prerequisite
 
-The demo configuration must be one that passed [Retrieval Gate R0](../research/retrieval-benchmark.md). A saved evidence corpus may make rehearsal repeatable, but it cannot be presented as live retrieval.
+For project-team operation, the exact configuration must have passed the frozen [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md) prototype smoke gate and the demo must state that full R0 has not yet passed. Any future external demo or user requires a route that passed [Retrieval Gate R0](../research/retrieval-benchmark.md). A saved evidence corpus may make rehearsal repeatable, but it cannot be presented as live retrieval.
 
 ## Demo script
 
@@ -36,8 +36,8 @@ The demo configuration must be one that passed [Retrieval Gate R0](../research/r
 
 | Failure | Allowed fallback |
 |---|---|
-| Live discovery provider outage | Use an R0-recorded real URL set and clearly label discovery as replayed evidence |
-| One fetch tier is technically incomplete | Use only the explicit R0-approved escalation policy and display both observations |
+| Live discovery provider outage | Persist the failed ADR-012 observation; an operator may explicitly replay retained evidence or rerun another separately configured provider, with clear labeling |
+| Thread retrieval is incomplete | Persist `INCOMPLETE`; do not silently hop providers. An operator may explicitly rerun another configured variant and display both observations |
 | Access block/authentication/CAPTCHA/rate limit | Stop and show the classified failure; do not rotate around it |
 | Browser preparation session fails | Show the failed preparation evidence; do not bypass authorization or silently consume again |
 | Model output is weak | Use the saved labeled Conversation and demonstrate regenerate/edit/version/review openly |

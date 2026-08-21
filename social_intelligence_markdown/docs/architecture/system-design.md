@@ -1,6 +1,6 @@
 # System Design
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 The platform is headless-first, with a first-party SvelteKit application and an agent-native MCP adapter. Both call the same application/domain services and authorization rules; PostgreSQL is canonical state.
@@ -16,6 +16,8 @@ flowchart TB
     Q --> RW[Retrieval workers]
     Q --> LW[LLM Task workers]
     Q --> PW[Preparation worker]
+    RW --> ODDG[Obscura + DuckDuckGo Lite discovery]
+    RW --> ORT[Obscura Reddit thread fetch]
     RW --> SEARCH[Versioned Search APIs / URL Context]
     RW -. optional measured adapter .-> MANAGED[Pinned managed Actor]
     RW --> CRAWLEE[Crawlee HTTP / Playwright]
@@ -29,7 +31,7 @@ flowchart TB
 
 ## Architecture decision
 
-FastAPI exposes application APIs; PostgreSQL stores canonical domain state; workers execute long-running retrieval, model, browser, and later media work. Pydantic AI is the default typed LLM execution layer for both simple structured calls and bounded tool-using agents. Retrieval uses capability-specific discovery/fetch ports selected only after Gate R0.
+FastAPI exposes application APIs; PostgreSQL stores canonical domain state; workers execute long-running retrieval, model, browser, and later media work. Pydantic AI is the default typed LLM execution layer for both simple structured calls and bounded tool-using agents. Retrieval uses capability-specific discovery/fetch ports. ADR-012 provisionally selects exact Obscura-backed variants for the Internal Product; full R0 remains the provider-graduation and external-use gate.
 
 MCP is valuable for agent access, but campaign configuration, bulk triage, source inspection, content diffs, account/destination selection, and approval are better first-party UI workflows. MCP remains a thin adapter rather than a second product state or authorization path.
 
@@ -45,7 +47,7 @@ MCP is valuable for agent access, but campaign configuration, bulk triage, sourc
 | Typed LLM execution | Pydantic AI v2-compatible pinned range | Structured outputs, validation, tools when needed, limits, evals, telemetry |
 | Database | PostgreSQL + SQLAlchemy 2 + Alembic | Canonical state and authorization constraints |
 | Queue/cache | Redis + lightweight worker framework | Prototype jobs, retries, coordination; avoid Kafka initially |
-| Retrieval | R0-selected adapters behind discovery/fetch ports | Each Search API/plan, URL Context, Crawlee HTTP/Playwright, optional pinned managed Actor, isolated browser-JSON experiment and CUA is a distinct measured variant |
+| Retrieval | ADR-012 provisional Obscura + DuckDuckGo Lite discovery and Obscura thread-fetch adapters; later R0-graduated adapters | Each Search API/plan, HTML surface, URL Context, browser/runtime, optional pinned managed Actor, isolated browser-JSON experiment, and CUA is a distinct measured variant |
 | Official Reddit | Async PRAW after approved access | Async structured provider; not an MVP dependency |
 | Media | Higgsfield API in expansion | Optional, outside vertical-slice critical path |
 | Object storage | S3-compatible | Immutable retrieval evidence and finalized media |
@@ -84,7 +86,7 @@ For the prototype, one application deployment plus capability-separated workers 
 
 | Item | Decision or experiment |
 |---|---|
-| Retrieval viability | Hard R0 gate with frozen queries/labels and explicit quality, completeness, reliability, latency, cost, evidence, and policy thresholds |
+| Retrieval viability | ADR-012 smoke gate for the time-boxed Internal Product; full R0 with frozen queries/labels and quality, completeness, reliability, latency, cost, evidence, and policy thresholds for provider graduation or external use |
 | Pydantic AI | Default typed LLM execution layer, including non-agentic calls; application remains control plane |
 | Retrieval ports | Separate `RedditDiscoverySource` and `RedditThreadFetcher`; publishing stays separate |
 | Crawlee | Benchmark HTTP/Parsel and fixed Playwright tiers; no evasion configuration; transient storage only |

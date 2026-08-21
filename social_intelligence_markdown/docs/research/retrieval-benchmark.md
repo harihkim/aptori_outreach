@@ -1,9 +1,9 @@
 # Retrieval Gate R0: Evaluation Protocol
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
-R0 is a quantitative go/no-go gate for the Reddit-first product premise. No default provider is selected and no vertical-slice build is funded until a frozen evaluation demonstrates at least one compliant end-to-end route from campaign query to sufficiently complete normalized Conversation.
+R0 is the quantitative go/no-go gate for graduating a Reddit retrieval route beyond a dated exception and for any future external use. [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md) separately authorizes exact provisional variants for the project-team-operated Internal Product after a smaller frozen smoke gate. That exception does not select an R0 winner, modify these thresholds, or count as an R0 pass.
 
 ## Gate outcome
 
@@ -11,16 +11,27 @@ R0 is a quantitative go/no-go gate for the Reddit-first product premise. No defa
 PASS
   -> at least one compliant discovery + known-thread route meets every
      mandatory threshold
-  -> build the prototype vertical slice
+  -> graduate the measured provider route beyond the time-box
+  -> make it eligible for future external-use review
 
 FAIL
-  -> do not compensate with UI/content/media scope
+  -> do not claim provider graduation or external readiness
   -> rework provider mix, access posture, query design, thresholds,
      or the Reddit-first product premise
   -> freeze a new evaluation version before rerunning
 ```
 
 There is no subjective “demo operator likes eight results” override. A failed metric may be investigated, but changing the corpus, labels, thresholds, or scoring after seeing results creates a new evaluation version.
+
+## ADR-012 prototype smoke protocol
+
+This smoke gate is deliberately smaller than R0. It permits progress on the Internal Product only and must be frozen before scoring.
+
+**Discovery:** run 10 representative campaign queries through `ObscuraDuckDuckGoLiteDiscoverySource`. At least 8 of 10 must return one or more canonical Reddit thread candidates; every emitted candidate must be a valid canonical Reddit thread URL; empty, blocked, parse, and transport outcomes must be explicit.
+
+**Known-thread fetching:** run 10 varied frozen threads through `ObscuraRedditThreadFetcher` twice. At least 8 of 10 must succeed in each run. Successful normalized trees must have zero duplicate comments and zero missing parent references. Any unresolved Reddit `more` node is `INCOMPLETE`. Replaying retained raw evidence must reproduce the identical normalized-content hash.
+
+The authorized access class is anonymous standard Obscura only. Any account/session requirement, CAPTCHA continuation, stealth setting, residential proxy, proxy rotation, or identity rotation fails the smoke boundary. There is no hidden fallback; an operator may explicitly rerun another configured variant and persist it as a separate observation.
 
 ## Frozen artifacts
 
@@ -36,6 +47,7 @@ retrieval-eval/
 │   ├── gemini-google-search.json
 │   ├── openai-web-search.json
 │   ├── brave-search-api.json
+│   ├── obscura-duckduckgo-lite.json
 │   ├── duckduckgo-html.json
 │   ├── url-context.json
 │   ├── crawlee-http.json
@@ -43,6 +55,7 @@ retrieval-eval/
 │   ├── apify-<actor>-<build>.json
 │   ├── opencli-browser-json.json
 │   ├── rdt-cli-cookie-json.json
+│   ├── obscura-reddit-thread.json
 │   ├── cua.json
 │   └── asyncpraw.json
 ├── results/
@@ -106,6 +119,7 @@ Grades 2-3 count as relevant. Grade 3 with a permitted recommended action counts
 
 ### Discovery
 
+- Provisional `ObscuraDuckDuckGoLiteDiscoverySource`, evaluated as its exact pinned browser/runtime and DuckDuckGo Lite page-surface configuration; ADR-012 grants no automatic R0 credit.
 - Approved Reddit Data API search/listings through Async PRAW, only if approved credentials exist.
 - Approved web-search discovery with site-scoped Reddit queries; each concrete API and plan is a separate variant.
 - Brave Search API only as an authenticated subscription-token variant with captured rate-limit headers.
@@ -117,6 +131,7 @@ Grades 2-3 count as relevant. Grade 3 with a permitted recommended action counts
 
 ### Known-thread fetching
 
+- Provisional `ObscuraRedditThreadFetcher`, evaluated using anonymous standard navigation and the exact pinned in-origin structured-fetch extractor; ADR-012 grants no automatic R0 credit.
 - Approved Async PRAW direct ID/URL fetch with frozen comment sort and `MoreComments` budget.
 - Gemini URL Context.
 - Crawlee `HttpCrawler`/`ParselCrawler` with fixed configuration.
@@ -215,6 +230,6 @@ The USD 1.00 ceiling is a prototype funding threshold, not a permanent unit-econ
 
 ## Gate authority
 
-The engineering/product owner signs the frozen protocol before the first run and signs the R0 result. A passing score authorizes only the prototype vertical slice and the measured provider/configuration; it does not authorize production scale, new data uses, automatic posting, or unmeasured fallback behavior.
+The engineering/product owner signs the frozen protocol before the first run and signs the R0 result. A passing score graduates only the measured provider/configuration for the evaluated use; it does not authorize production scale, new data uses, automatic posting, or unmeasured fallback behavior. ADR-012 is a separate dated internal-only authority and expires into mandatory reassessment on 2026-09-20.
 
-See [Reddit Retrieval Architecture](../architecture/retrieval.md), [Implementation Roadmap](../roadmap/roadmap.md), the [Crawlee/PRAW research note](crawlee-praw-asyncpraw.md), [Agent Reach assessment](agent-reach.md), and [third-party scraping-claims assessment](third-party-scraping-claims.md).
+See [Reddit Retrieval Architecture](../architecture/retrieval.md), [Implementation Roadmap](../roadmap/roadmap.md), [ADR-012](../adr/012-time-boxed-internal-retrieval-selection.md), the [Crawlee/PRAW research note](crawlee-praw-asyncpraw.md), [Agent Reach assessment](agent-reach.md), and [third-party scraping-claims assessment](third-party-scraping-claims.md).

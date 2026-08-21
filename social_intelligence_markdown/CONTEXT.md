@@ -28,6 +28,14 @@ _Avoid_: Page, scrape
 A Campaign-specific assessment that a Conversation may merit monitoring, a helpful response, or original content work.
 _Avoid_: Lead, Candidate
 
+**Internal Product**:
+A fully implemented, deployable, and product-polished system operated only by the project team. It is neither an external pilot nor evidence that a retrieval provider has passed Retrieval Gate R0.
+_Avoid_: Demo, public beta
+
+**Provisional Retrieval Selection**:
+A dated, reversible authorization to use exact discovery and thread-fetch variants in the Internal Product before full R0, bounded by smoke evidence, suspension conditions, and mandatory review.
+_Avoid_: R0-approved provider, production provider
+
 ## Creative and review
 
 **Draft**:

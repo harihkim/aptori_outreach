@@ -15,7 +15,7 @@ The first vertical slice needs only enough MCP surface to prove that domain serv
 | `search_opportunities` | Query canonical ranked Opportunities by campaign and filters. |
 | `get_opportunity` | Return one Opportunity with Conversation, analysis, and provenance projections. |
 
-These read tools should be implemented after their underlying domain services exist, without delaying Retrieval Gate R0 or the first-party review workflow.
+These read tools should be implemented after their underlying domain services exist, without delaying the ADR-012 prototype smoke, full Retrieval Gate R0 work, or the first-party review workflow.
 
 ## Expansion tools
 
