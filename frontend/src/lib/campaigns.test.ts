@@ -168,11 +168,22 @@ describe('explainCampaignError', () => {
 			explainCampaignError(503, { detail: { code: 'workspace_unconfigured' } })
 		).toBe('The backend database needs its migrations run.');
 		expect(
+			explainCampaignError(403, { detail: { code: 'workspace_forbidden' } })
+		).toBe('The backend token cannot access this workspace.');
+		expect(
 			explainCampaignError(400, { detail: { code: 'idempotency_key_required' } })
 		).toBe('The form lost its submission key; refresh and try again.');
 		expect(
+			explainCampaignError(400, { detail: { code: 'idempotency_key_too_long' } })
+		).toBe('The form submission key is invalid; refresh and try again.');
+		expect(
 			explainCampaignError(409, { detail: { code: 'idempotency_key_conflict' } })
 		).toBe('This submission key was already used for different content.');
+		expect(
+			explainCampaignError(409, {
+				detail: { code: 'idempotency_key_reconciliation_required' }
+			})
+		).toBe('This older submission needs operator reconciliation before retrying.');
 	});
 
 	it('falls back to a generic message for unknown failures', () => {

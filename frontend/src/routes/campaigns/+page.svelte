@@ -2,7 +2,14 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
-	import { nextActions, type Campaign, type PromotionPosture } from '$lib/campaigns';
+	import {
+		CREATE_SUBMISSION_ID,
+		nextActions,
+		transitionSubmissionId,
+		updateSubmissionId,
+		type Campaign,
+		type PromotionPosture
+	} from '$lib/campaigns';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form = null }: { data: PageData; form?: ActionData } = $props();
@@ -37,13 +44,18 @@
 		return suffix === '' ? field : `${field}-${suffix}`;
 	}
 
-	// A failed submission echoes its key back so retrying replays it instead
-	// of creating a second write; fresh keys otherwise.
-	let submissionKey = $derived(
-		form && 'idempotency_key' in form && typeof form.idempotency_key === 'string'
-			? form.idempotency_key
-			: crypto.randomUUID()
-	);
+	function keyFor(submissionId: string): string {
+		if (
+			form &&
+			'submission_id' in form &&
+			form.submission_id === submissionId &&
+			'idempotency_key' in form &&
+			typeof form.idempotency_key === 'string'
+		) {
+			return form.idempotency_key;
+		}
+		return data.submissionKeys[submissionId] ?? '';
+	}
 </script>
 
 <svelte:head>
@@ -135,7 +147,12 @@
 		</Card.Header>
 		<Card.Content>
 			<form method="POST" action="?/create" class="grid gap-4">
-				<input type="hidden" name="idempotency_key" value={submissionKey} />
+				<input type="hidden" name="submission_id" value={CREATE_SUBMISSION_ID} />
+				<input
+					type="hidden"
+					name="idempotency_key"
+					value={keyFor(CREATE_SUBMISSION_ID)}
+				/>
 				{@render formFields('', null)}
 				<Button type="submit">Create campaign</Button>
 			</form>
@@ -171,7 +188,16 @@
 							{#each nextActions(campaign.status) as action (action.status)}
 								<form method="POST" action="?/transition">
 									<input type="hidden" name="campaign_id" value={campaign.id} />
-									<input type="hidden" name="idempotency_key" value={submissionKey} />
+									<input
+										type="hidden"
+										name="submission_id"
+										value={transitionSubmissionId(campaign.id, action.status)}
+									/>
+									<input
+										type="hidden"
+										name="idempotency_key"
+										value={keyFor(transitionSubmissionId(campaign.id, action.status))}
+									/>
 									<input type="hidden" name="status" value={action.status} />
 									<Button
 										type="submit"
@@ -187,7 +213,16 @@
 							<summary class="cursor-pointer text-sm text-muted-foreground">Edit</summary>
 							<form method="POST" action="?/update" class="mt-3 grid gap-4">
 								<input type="hidden" name="campaign_id" value={campaign.id} />
-								<input type="hidden" name="idempotency_key" value={submissionKey} />
+								<input
+									type="hidden"
+									name="submission_id"
+									value={updateSubmissionId(campaign.id)}
+								/>
+								<input
+									type="hidden"
+									name="idempotency_key"
+									value={keyFor(updateSubmissionId(campaign.id))}
+								/>
 								{@render formFields(campaign.id, campaign)}
 								<Button type="submit" variant="outline" size="sm">Save changes</Button>
 							</form>

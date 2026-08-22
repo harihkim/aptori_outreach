@@ -44,6 +44,19 @@ export type CampaignsState = {
 
 export type LifecycleAction = { status: CampaignStatus; label: string };
 
+export const CREATE_SUBMISSION_ID = 'create';
+
+export function updateSubmissionId(campaignId: string): string {
+	return `update:${campaignId}`;
+}
+
+export function transitionSubmissionId(
+	campaignId: string,
+	status: string
+): string {
+	return `transition:${campaignId}:${status}`;
+}
+
 const STATUSES: CampaignStatus[] = ['draft', 'active', 'paused', 'archived'];
 const POSTURES: PromotionPosture[] = ['expertise_first', 'balanced', 'high_intent_only'];
 
@@ -189,10 +202,16 @@ export function explainCampaignError(httpStatus: number, body: unknown): string 
 			return 'The backend has no API token configured.';
 		case 'workspace_unconfigured':
 			return 'The backend database needs its migrations run.';
+		case 'workspace_forbidden':
+			return 'The backend token cannot access this workspace.';
 		case 'idempotency_key_required':
 			return 'The form lost its submission key; refresh and try again.';
+		case 'idempotency_key_too_long':
+			return 'The form submission key is invalid; refresh and try again.';
 		case 'idempotency_key_conflict':
 			return 'This submission key was already used for different content.';
+		case 'idempotency_key_reconciliation_required':
+			return 'This older submission needs operator reconciliation before retrying.';
 	}
 	if (httpStatus === 422) {
 		return 'Some fields were invalid.';

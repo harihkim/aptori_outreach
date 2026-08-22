@@ -4,7 +4,13 @@ import { cleanup, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Page from './+page.svelte';
-import type { Campaign } from '$lib/campaigns';
+import {
+	CREATE_SUBMISSION_ID,
+	nextActions,
+	transitionSubmissionId,
+	updateSubmissionId,
+	type Campaign
+} from '$lib/campaigns';
 
 vi.mock('$app/navigation', () => ({ invalidate: vi.fn() }));
 
@@ -29,17 +35,33 @@ function campaign(overrides: Partial<Campaign>): Campaign {
 	};
 }
 
+function pageData(
+	campaigns: Campaign[] = [],
+	detail: string | null = null,
+	apiReachable = true
+) {
+	const submissionKeys: Record<string, string> = {
+		[CREATE_SUBMISSION_ID]: 'key:create'
+	};
+	for (const item of campaigns) {
+		if (item.status !== 'archived') {
+			submissionKeys[updateSubmissionId(item.id)] = `key:update:${item.id}`;
+		}
+		for (const action of nextActions(item.status)) {
+			submissionKeys[transitionSubmissionId(item.id, action.status)] =
+				`key:transition:${item.id}:${action.status}`;
+		}
+	}
+	return { apiReachable, detail, campaigns, submissionKeys };
+}
+
 describe('campaigns/+page.svelte', () => {
 	it('lists campaigns with their status and lifecycle actions', () => {
 		render(Page, {
-			data: {
-				apiReachable: true,
-				detail: null,
-				campaigns: [
-					campaign({ id: 'a', name: 'Draft research objective', status: 'draft' }),
-					campaign({ id: 'b', name: 'Running post', status: 'active' })
-				]
-			}
+			data: pageData([
+				campaign({ id: 'a', name: 'Draft research objective', status: 'draft' }),
+				campaign({ id: 'b', name: 'Running post', status: 'active' })
+			])
 		});
 
 		expect(screen.getByText('Draft research objective')).toBeInTheDocument();
@@ -53,13 +75,14 @@ describe('campaigns/+page.svelte', () => {
 
 	it('retires archived campaigns: badge shown, no lifecycle or edit affordances', () => {
 		render(Page, {
-			data: {
-				apiReachable: true,
-				detail: null,
-				campaigns: [
-					campaign({ id: 'a', name: 'Old post', status: 'archived', archivedAt: '2026-08-22T12:00:00Z' })
-				]
-			}
+			data: pageData([
+				campaign({
+					id: 'a',
+					name: 'Old post',
+					status: 'archived',
+					archivedAt: '2026-08-22T12:00:00Z'
+				})
+			])
 		});
 
 		expect(screen.getByText('Old post')).toBeInTheDocument();
@@ -70,7 +93,7 @@ describe('campaigns/+page.svelte', () => {
 	});
 
 	it('offers a creation form with the required positioning fields', () => {
-		render(Page, { data: { apiReachable: true, detail: null, campaigns: [] } });
+		render(Page, { data: pageData() });
 
 		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
 		expect(createForm).not.toBeNull();
@@ -85,18 +108,14 @@ describe('campaigns/+page.svelte', () => {
 
 	it('summarizes the claim policy on campaigns that carry one', () => {
 		render(Page, {
-			data: {
-				apiReachable: true,
-				detail: null,
-				campaigns: [
-					campaign({
-						id: 'a',
-						name: 'Guarded post',
-						approvedClaims: ['Aptori runs in CI'],
-						prohibitedClaims: ['100% vulnerability coverage']
-					})
-				]
-			}
+			data: pageData([
+				campaign({
+					id: 'a',
+					name: 'Guarded post',
+					approvedClaims: ['Aptori runs in CI'],
+					prohibitedClaims: ['100% vulnerability coverage']
+				})
+			])
 		});
 
 		expect(
@@ -106,9 +125,10 @@ describe('campaigns/+page.svelte', () => {
 
 	it('surfaces action failures returned by the form actions', () => {
 		render(Page, {
-			data: { apiReachable: true, detail: null, campaigns: [] },
+			data: pageData(),
 			form: {
 				message: 'That lifecycle change is not allowed.',
+				submission_id: CREATE_SUBMISSION_ID,
 				idempotency_key: 'transition-key'
 			}
 		});
@@ -118,11 +138,7 @@ describe('campaigns/+page.svelte', () => {
 
 	it('surfaces a reachable backend failure instead of an empty workspace', () => {
 		render(Page, {
-			data: {
-				apiReachable: true,
-				detail: 'Unexpected response (HTTP 500)',
-				campaigns: []
-			}
+			data: pageData([], 'Unexpected response (HTTP 500)')
 		});
 
 		expect(screen.getByText('Unexpected response (HTTP 500)')).toBeInTheDocument();
@@ -130,7 +146,7 @@ describe('campaigns/+page.svelte', () => {
 	});
 
 	it('edits every list one value per line', () => {
-		render(Page, { data: { apiReachable: true, detail: null, campaigns: [] } });
+		render(Page, { data: pageData() });
 
 		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
 		for (const label of ['Keywords', 'Subreddits', 'Competitors', 'Approved claims', 'Prohibited claims']) {
@@ -140,8 +156,12 @@ describe('campaigns/+page.svelte', () => {
 
 	it('keeps a stable submission key across a failed submission', () => {
 		render(Page, {
-			data: { apiReachable: true, detail: null, campaigns: [] },
-			form: { message: 'Backend did not answer.', idempotency_key: 'stable-key' }
+			data: pageData(),
+			form: {
+				message: 'Backend did not answer.',
+				submission_id: CREATE_SUBMISSION_ID,
+				idempotency_key: 'stable-key'
+			}
 		});
 
 		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
@@ -151,9 +171,52 @@ describe('campaigns/+page.svelte', () => {
 		expect(hidden.value).toBe('stable-key');
 	});
 
+	it('gives every logical form its own submission key', () => {
+		const active = campaign({ id: 'active-campaign', status: 'active' });
+		render(Page, { data: pageData([active]) });
+
+		const forms = Array.from(document.querySelectorAll('form'));
+		const keys = forms.map((element) => {
+			const input = element.querySelector(
+				'input[name="idempotency_key"]'
+			) as HTMLInputElement | null;
+			return input?.value;
+		});
+
+		expect(keys).toHaveLength(4);
+		expect(new Set(keys).size).toBe(4);
+	});
+
+	it('restores a failed key only to the form that submitted it', () => {
+		const active = campaign({ id: 'active-campaign', status: 'active' });
+		const failedId = transitionSubmissionId(active.id, 'paused');
+		render(Page, {
+			data: pageData([active]),
+			form: {
+				message: 'Backend did not answer.',
+				submission_id: failedId,
+				idempotency_key: 'failed-pause-key'
+			}
+		});
+
+		const failedIdInput = document.querySelector(
+			`input[name="submission_id"][value="${failedId}"]`
+		) as HTMLInputElement;
+		const failedForm = failedIdInput.closest('form') as HTMLFormElement;
+		const failedKey = failedForm.querySelector(
+			'input[name="idempotency_key"]'
+		) as HTMLInputElement;
+		const createKey = document.querySelector(
+			'form[action="?/create"] input[name="idempotency_key"]'
+		) as HTMLInputElement;
+
+		expect(failedKey.value).toBe('failed-pause-key');
+		expect(createKey.value).toBe('key:create');
+	});
+
 	it('explains when the backend is unreachable', () => {
 		render(Page, {
-			data: { apiReachable: false, detail: 'Backend did not answer', campaigns: [] }
+			data: pageData([], 'Backend did not answer', false)
 		});
 
 		expect(screen.getByText('Backend did not answer')).toBeInTheDocument();
