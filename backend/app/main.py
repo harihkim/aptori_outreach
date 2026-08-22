@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
 
+from app.campaigns.router import router as campaigns_router
 from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.schemas import HealthResponse
@@ -26,6 +26,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.state.database = manager
+    app.include_router(campaigns_router)
 
     @app.get(
         "/health",
@@ -54,8 +55,3 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
 
 app = create_app()
-
-
-def get_session(request: Request) -> Iterator[Session]:
-    manager: DatabaseSessionManager = request.app.state.database
-    yield from manager.session()

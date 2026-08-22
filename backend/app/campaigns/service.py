@@ -1,0 +1,136 @@
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.auditing.service import record_audit
+from app.campaigns.models import Campaign
+from app.campaigns.schemas import CampaignCreate, CampaignUpdate
+
+# DRAFT -> ACTIVE -> PAUSED -> ACTIVE ; ACTIVE|PAUSED -> ARCHIVED
+LEGAL_TRANSITIONS = {
+    ("draft", "active"),
+    ("active", "paused"),
+    ("paused", "active"),
+    ("active", "archived"),
+    ("paused", "archived"),
+}
+
+# The prototype has no authenticated principals yet; every write is the
+# single internal operator. Replaced when review-time human identity lands.
+ACTOR = "operator"
+
+
+class CampaignNotFound(LookupError):
+    """No campaign with that id exists in the caller's workspace."""
+
+
+class CampaignArchivedError(ValueError):
+    """Archived campaigns are terminal; nothing about them may change."""
+
+
+class InvalidCampaignTransitionError(ValueError):
+    def __init__(self, current: str, requested: str) -> None:
+        self.current = current
+        self.requested = requested
+        super().__init__(f"{current} -> {requested} is not a legal campaign transition")
+
+
+def create_campaign(
+    session: Session, workspace_id: uuid.UUID, payload: CampaignCreate
+) -> Campaign:
+    campaign = Campaign(workspace_id=workspace_id, **payload.model_dump())
+    session.add(campaign)
+    session.flush()
+    record_audit(
+        session,
+        actor=ACTOR,
+        action="campaign.created",
+        target_type="campaign",
+        target_id=campaign.id,
+        after={"status": campaign.status},
+    )
+    session.commit()
+    return campaign
+
+
+def get_campaign(
+    session: Session, workspace_id: uuid.UUID, campaign_id: uuid.UUID
+) -> Campaign:
+    campaign = session.scalar(
+        select(Campaign).where(
+            Campaign.id == campaign_id, Campaign.workspace_id == workspace_id
+        )
+    )
+    if campaign is None:
+        raise CampaignNotFound(str(campaign_id))
+    return campaign
+
+
+def list_campaigns(session: Session, workspace_id: uuid.UUID) -> list[Campaign]:
+    campaigns = session.scalars(
+        select(Campaign)
+        .where(Campaign.workspace_id == workspace_id)
+        .order_by(Campaign.created_at.desc(), Campaign.id)
+    )
+    return list(campaigns)
+
+
+def update_campaign(
+    session: Session,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    payload: CampaignUpdate,
+) -> Campaign:
+    campaign = get_campaign(session, workspace_id, campaign_id)
+    updates: dict[str, Any] = payload.model_dump(exclude_unset=True)
+    requested_status = updates.pop("status", None)
+
+    _assert_mutable(campaign, updates, requested_status)
+    if requested_status is not None and requested_status != campaign.status:
+        _assert_transition(campaign.status, requested_status)
+
+    if updates:
+        for field, value in updates.items():
+            setattr(campaign, field, value)
+        record_audit(
+            session,
+            actor=ACTOR,
+            action="campaign.updated",
+            target_type="campaign",
+            target_id=campaign.id,
+            after={"fields": sorted(updates)},
+        )
+
+    if requested_status is not None and requested_status != campaign.status:
+        before = campaign.status
+        campaign.status = requested_status
+        if requested_status == "archived":
+            campaign.archived_at = datetime.now(UTC)
+        record_audit(
+            session,
+            actor=ACTOR,
+            action="campaign.transitioned",
+            target_type="campaign",
+            target_id=campaign.id,
+            before={"status": before},
+            after={"status": requested_status},
+        )
+
+    session.commit()
+    return campaign
+
+
+def _assert_mutable(
+    campaign: Campaign, updates: dict[str, Any], requested_status: str | None
+) -> None:
+    status_change = requested_status is not None and requested_status != campaign.status
+    if campaign.status == "archived" and (updates or status_change):
+        raise CampaignArchivedError(str(campaign.id))
+
+
+def _assert_transition(current: str, requested: str) -> None:
+    if (current, requested) not in LEGAL_TRANSITIONS:
+        raise InvalidCampaignTransitionError(current, requested)
