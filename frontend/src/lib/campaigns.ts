@@ -29,6 +29,8 @@ export type Campaign = {
 	keywords: string[];
 	subreddits: string[];
 	competitors: string[];
+	approvedClaims: string[];
+	prohibitedClaims: string[];
 	createdAt: string;
 	archivedAt: string | null;
 };
@@ -106,6 +108,8 @@ export function parseCampaignsResponse({
 			keywords: stringList(entry.keywords),
 			subreddits: stringList(entry.subreddits),
 			competitors: stringList(entry.competitors),
+			approvedClaims: stringList(entry.approved_claims),
+			prohibitedClaims: stringList(entry.prohibited_claims),
 			createdAt: entry.created_at,
 			archivedAt: entry.archived_at
 		});

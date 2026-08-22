@@ -21,6 +21,8 @@ function campaign(overrides: Partial<Campaign>): Campaign {
 		keywords: [],
 		subreddits: [],
 		competitors: [],
+		approvedClaims: [],
+		prohibitedClaims: [],
 		createdAt: '2026-08-22T10:00:00Z',
 		archivedAt: null,
 		...overrides
@@ -76,7 +78,30 @@ describe('campaigns/+page.svelte', () => {
 		expect(within(createForm).getByLabelText('Name')).toBeRequired();
 		expect(within(createForm).getByLabelText('Promotion posture')).toBeInTheDocument();
 		expect(within(createForm).getByLabelText('Keywords')).toBeInTheDocument();
+		expect(within(createForm).getByLabelText('Approved claims')).toBeInTheDocument();
+		expect(within(createForm).getByLabelText('Prohibited claims')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Create campaign' })).toBeInTheDocument();
+	});
+
+	it('summarizes the claim policy on campaigns that carry one', () => {
+		render(Page, {
+			data: {
+				apiReachable: true,
+				detail: null,
+				campaigns: [
+					campaign({
+						id: 'a',
+						name: 'Guarded post',
+						approvedClaims: ['Aptori runs in CI'],
+						prohibitedClaims: ['100% vulnerability coverage']
+					})
+				]
+			}
+		});
+
+		expect(
+			screen.getByText('Claim policy: 1 approved, 1 prohibited')
+		).toBeInTheDocument();
 	});
 
 	it('surfaces action failures returned by the form actions', () => {

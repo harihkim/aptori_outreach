@@ -46,6 +46,8 @@ describe('parseCampaignsResponse', () => {
 					keywords: ['API security', 'pentest'],
 					subreddits: ['cybersecurity'],
 					competitors: ['Burp Suite'],
+					approvedClaims: ['Aptori runs in CI'],
+					prohibitedClaims: [],
 					createdAt: '2026-08-22T10:00:00Z',
 					archivedAt: null
 				}
@@ -57,11 +59,21 @@ describe('parseCampaignsResponse', () => {
 	it('defaults absent list fields instead of rejecting the entry', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, keywords: undefined, competitors: undefined }]
+			body: [
+				{
+					...campaignBody,
+					keywords: undefined,
+					competitors: undefined,
+					approved_claims: undefined,
+					prohibited_claims: undefined
+				}
+			]
 		});
 
 		expect(state.campaigns[0]?.keywords).toEqual([]);
 		expect(state.campaigns[0]?.competitors).toEqual([]);
+		expect(state.campaigns[0]?.approvedClaims).toEqual([]);
+		expect(state.campaigns[0]?.prohibitedClaims).toEqual([]);
 	});
 
 	it('treats an entry with an unknown status as an unexpected response', () => {

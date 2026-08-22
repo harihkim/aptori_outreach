@@ -43,6 +43,21 @@ function tagList(form: FormData, field: string): string[] {
 	return parseTagInput(String(form.get(field) ?? ''));
 }
 
+/** The full editable Campaign contract, identical for create and update. */
+function campaignPayload(form: FormData): Record<string, string | string[] | null> {
+	return {
+		name: requiredText(form, 'name'),
+		product_context: optionalText(form, 'product_context'),
+		icp: optionalText(form, 'icp'),
+		keywords: tagList(form, 'keywords'),
+		subreddits: tagList(form, 'subreddits'),
+		competitors: tagList(form, 'competitors'),
+		approved_claims: tagList(form, 'approved_claims'),
+		prohibited_claims: tagList(form, 'prohibited_claims'),
+		promotion_posture: requiredText(form, 'promotion_posture')
+	};
+}
+
 export const load: PageServerLoad = async ({ fetch, depends }) => {
 	depends('app:campaigns');
 
@@ -64,15 +79,7 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 export const actions: Actions = {
 	create: async ({ request }) => {
 		const form = await request.formData();
-		const result = await callApi('POST', '/campaigns', {
-			name: requiredText(form, 'name'),
-			product_context: optionalText(form, 'product_context'),
-			icp: optionalText(form, 'icp'),
-			keywords: tagList(form, 'keywords'),
-			subreddits: tagList(form, 'subreddits'),
-			competitors: tagList(form, 'competitors'),
-			promotion_posture: requiredText(form, 'promotion_posture')
-		});
+		const result = await callApi('POST', '/campaigns', campaignPayload(form));
 		if (!result.ok) {
 			return fail(400, { message: explain(result) });
 		}
@@ -84,15 +91,7 @@ export const actions: Actions = {
 		const result = await callApi(
 			'PATCH',
 			`/campaigns/${requiredText(form, 'campaign_id')}`,
-			{
-				name: requiredText(form, 'name'),
-				product_context: optionalText(form, 'product_context'),
-				icp: optionalText(form, 'icp'),
-				keywords: tagList(form, 'keywords'),
-				subreddits: tagList(form, 'subreddits'),
-				competitors: tagList(form, 'competitors'),
-				promotion_posture: requiredText(form, 'promotion_posture')
-			}
+			campaignPayload(form)
 		);
 		if (!result.ok) {
 			return fail(400, { message: explain(result) });
