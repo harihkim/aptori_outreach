@@ -73,6 +73,25 @@ def list_campaigns(session: Session, workspace_id: uuid.UUID) -> list[Campaign]:
     return list(campaigns)
 
 
+def get_campaign_locked(
+    session: Session, workspace_id: uuid.UUID, campaign_id: uuid.UUID
+) -> Campaign:
+    """Fetch the campaign holding its row lock.
+
+    Serializes concurrent writers: the read blocks on any open row lock and
+    then observes the committed state the mutation must validate against,
+    so a transition cannot validate against a stale status.
+    """
+    campaign = session.scalar(
+        select(Campaign)
+        .where(Campaign.id == campaign_id, Campaign.workspace_id == workspace_id)
+        .with_for_update()
+    )
+    if campaign is None:
+        raise CampaignNotFound(str(campaign_id))
+    return campaign
+
+
 def update_campaign(
     session: Session,
     workspace_id: uuid.UUID,
@@ -80,7 +99,7 @@ def update_campaign(
     actor: str,
     payload: CampaignUpdate,
 ) -> Campaign:
-    campaign = get_campaign(session, workspace_id, campaign_id)
+    campaign = get_campaign_locked(session, workspace_id, campaign_id)
     updates: dict[str, Any] = payload.model_dump(exclude_unset=True)
     requested_status = updates.pop("status", None)
 

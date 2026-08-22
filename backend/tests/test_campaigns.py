@@ -1,5 +1,7 @@
 """Campaign REST API at the FastAPI app boundary."""
 
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -400,3 +402,46 @@ def test_patch_rejects_explicit_null_fields(client: TestClient) -> None:
 
     # Nothing slipped through to the stored campaign.
     assert client.get(f"/campaigns/{campaign_id}").json() == created
+
+
+def test_transition_races_cannot_revive_an_archived_campaign(
+    client: TestClient, migrated_test_database: str
+) -> None:
+    created = created_campaign(client)
+    campaign_id = created["id"]
+    assert (
+        client.patch(
+            f"/campaigns/{campaign_id}", json={"status": "active"}, headers=write_headers()
+        ).status_code
+        == 200
+    )
+
+    def concurrent_archive() -> None:
+        engine = create_engine(migrated_test_database)
+        with engine.begin() as connection:
+            # Takes and holds the campaign's row lock in an open
+            # transaction while the API request below arrives.
+            connection.execute(
+                text(
+                    "UPDATE campaigns SET status = 'archived', archived_at = now()"
+                    " WHERE id = :id"
+                ),
+                {"id": campaign_id},
+            )
+            time.sleep(0.4)
+        engine.dispose()
+
+    thread = threading.Thread(target=concurrent_archive)
+    thread.start()
+    time.sleep(0.1)
+
+    response = client.patch(
+        f"/campaigns/{campaign_id}", json={"status": "paused"}, headers=write_headers()
+    )
+    thread.join()
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "campaign_archived"
+    stored = client.get(f"/campaigns/{campaign_id}").json()
+    assert stored["status"] == "archived"
+    assert stored["archived_at"] is not None
