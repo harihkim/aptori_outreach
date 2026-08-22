@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0002_campaigns_audit"
+HEAD_REVISION = "0003_idempotency_events"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -29,7 +29,13 @@ def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database:
         context = MigrationContext.configure(connection)
         assert context.get_current_revision() == HEAD_REVISION
         tables = set(inspect(connection).get_table_names())
-        assert tables == {"alembic_version", "workspaces", "campaigns", "audit_events"}
+        assert tables == {
+            "alembic_version",
+            "workspaces",
+            "campaigns",
+            "audit_events",
+            "idempotency_events",
+        }
 
 
 def test_migration_seeds_the_default_workspace(migrated_test_database: str) -> None:

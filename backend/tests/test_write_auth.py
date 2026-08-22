@@ -1,5 +1,6 @@
 """Write authentication at the FastAPI app boundary."""
 
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -66,7 +67,10 @@ def test_writes_accept_the_configured_bearer_token(migrated_test_database: str) 
         response = client.post(
             "/campaigns",
             json=create_payload(),
-            headers={"Authorization": f"Bearer {API_TOKEN}"},
+            headers={
+                "Authorization": f"Bearer {API_TOKEN}",
+                "Idempotency-Key": str(uuid.uuid4()),
+            },
         )
 
     assert response.status_code == 201
