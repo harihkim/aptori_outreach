@@ -18,11 +18,6 @@ LEGAL_TRANSITIONS: set[tuple[CampaignStatus, CampaignStatus]] = {
     ("paused", "archived"),
 }
 
-# The prototype has no authenticated principals yet; every write is the
-# single internal operator. Replaced when review-time human identity lands.
-ACTOR = "operator"
-
-
 class CampaignNotFound(LookupError):
     """No campaign with that id exists in the caller's workspace."""
 
@@ -39,14 +34,14 @@ class InvalidCampaignTransitionError(ValueError):
 
 
 def create_campaign(
-    session: Session, workspace_id: uuid.UUID, payload: CampaignCreate
+    session: Session, workspace_id: uuid.UUID, actor: str, payload: CampaignCreate
 ) -> Campaign:
     campaign = Campaign(workspace_id=workspace_id, **payload.model_dump())
     session.add(campaign)
     session.flush()
     record_audit(
         session,
-        actor=ACTOR,
+        actor=actor,
         action="campaign.created",
         target_type="campaign",
         target_id=campaign.id,
@@ -82,6 +77,7 @@ def update_campaign(
     session: Session,
     workspace_id: uuid.UUID,
     campaign_id: uuid.UUID,
+    actor: str,
     payload: CampaignUpdate,
 ) -> Campaign:
     campaign = get_campaign(session, workspace_id, campaign_id)
@@ -97,7 +93,7 @@ def update_campaign(
             setattr(campaign, field, value)
         record_audit(
             session,
-            actor=ACTOR,
+            actor=actor,
             action="campaign.updated",
             target_type="campaign",
             target_id=campaign.id,
@@ -111,7 +107,7 @@ def update_campaign(
             campaign.archived_at = datetime.now(UTC)
         record_audit(
             session,
-            actor=ACTOR,
+            actor=actor,
             action="campaign.transitioned",
             target_type="campaign",
             target_id=campaign.id,

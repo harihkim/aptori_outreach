@@ -12,9 +12,16 @@ from app.main import create_app
 from app.workspaces import DEFAULT_WORKSPACE_ID
 
 
+API_TOKEN = "test-token"
+
+
 @pytest.fixture()
 def client(migrated_test_database: str) -> Iterator[TestClient]:
-    with TestClient(create_app(database_url=migrated_test_database)) as test_client:
+    app = create_app(database_url=migrated_test_database, api_token=API_TOKEN)
+    # Default headers authenticate every write the suite issues.
+    with TestClient(
+        app, headers={"Authorization": f"Bearer {API_TOKEN}"}
+    ) as test_client:
         yield test_client
 
 

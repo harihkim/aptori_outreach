@@ -6,16 +6,19 @@ from fastapi import APIRouter, HTTPException, Path, status
 from app.campaigns import service
 from app.campaigns.models import Campaign
 from app.campaigns.schemas import CampaignCreate, CampaignResponse, CampaignUpdate
-from app.deps import SessionDep, WorkspaceDep
+from app.deps import SessionDep, WorkspaceDep, WritePrincipalDep
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_campaign(
-    payload: CampaignCreate, session: SessionDep, workspace: WorkspaceDep
+    payload: CampaignCreate,
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    actor: WritePrincipalDep,
 ) -> CampaignResponse:
-    campaign = service.create_campaign(session, workspace.id, payload)
+    campaign = service.create_campaign(session, workspace.id, actor, payload)
     return CampaignResponse.model_validate(campaign)
 
 
@@ -43,9 +46,10 @@ def update_campaign(
     payload: CampaignUpdate,
     session: SessionDep,
     workspace: WorkspaceDep,
+    actor: WritePrincipalDep,
 ) -> CampaignResponse:
     try:
-        campaign = service.update_campaign(session, workspace.id, campaign_id, payload)
+        campaign = service.update_campaign(session, workspace.id, campaign_id, actor, payload)
     except service.CampaignNotFound:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
