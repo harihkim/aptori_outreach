@@ -27,7 +27,7 @@ createdb aptori_outreach            # or: APTORI_DATABASE_URL=... in backend/.en
 
 The first domain slice is live: `POST /campaigns` creates a draft Campaign in the seeded default Workspace, `GET /campaigns` lists them newest first, and `GET/PATCH /campaigns/{id}` reads, edits, and walks the lifecycle (`DRAFT → ACTIVE → PAUSED → ACTIVE; ACTIVE|PAUSED → ARCHIVED`) with stable conflict codes and an append-only audit trail.
 
-Writes require two headers: `Authorization: Bearer <APTORI_API_TOKEN>` (set `APTORI_API_TOKEN` in `.env`; while unset, writes fail closed with `api_token_unconfigured`) and a unique `Idempotency-Key` per request, whose replay returns the originally recorded response without re-executing.
+Every route requires `Authorization: Bearer <APTORI_API_TOKEN>` (set `APTORI_API_TOKEN` in `.env`; an empty value is treated as unset, and while unset the API fails closed with `api_token_unconfigured`). Writes additionally require a unique `Idempotency-Key` header per request, whose replay returns the originally recorded response without re-executing.
 
 ## Tests
 
