@@ -26,15 +26,18 @@ def test_health_reports_ok_with_unified_contract(migrated_test_database: str) ->
 
 
 def test_health_reports_degraded_when_database_is_unreachable() -> None:
-    unreachable = "postgresql+psycopg://@/no_such_database_health_probe"
-    response = TestClient(create_app(database_url=unreachable)).get("/health")
+    leaky_url = "postgresql+psycopg://secret_user:super_secret@db-host-internal/no_such_db"
+    response = TestClient(create_app(database_url=leaky_url)).get("/health")
     assert response.status_code == 503
     body = response.json()
     # The API answered; only the database is down. The shape matches 200 responses.
     assert body["api"] == "reachable"
     assert body["status"] == "degraded"
     assert body["database"] == "unavailable"
-    assert body["detail"] is not None
+    # Diagnostics stay constant: no connection details, hosts, or credentials leak.
+    assert body["detail"] == "database unavailable"
+    assert "super_secret" not in response.text
+    assert "db-host-internal" not in response.text
 
 
 def test_session_manager_yields_working_sessions(migrated_test_database: str) -> None:

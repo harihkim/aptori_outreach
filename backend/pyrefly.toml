@@ -2,6 +2,7 @@
 project-includes = ["app", "tests"]
 project-excludes = [".venv"]
 python-version = "3.12"
+min-severity = "warn"
 
 # Pyrefly's defaults leave these off; enable them so pyrefly matches
 # the annotation discipline mypy --strict already enforces.

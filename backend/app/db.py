@@ -21,10 +21,18 @@ class DatabaseSessionManager:
             session.close()
 
     def probe(self) -> tuple[bool, str | None]:
-        """Round-trip the engine's pool; classify and return the failure reason."""
+        """Round-trip the engine's pool.
+
+        Returns (healthy, failure_reason). The failure reason may contain
+        connection details — log it, never send it to clients.
+        """
         try:
             with self.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             return True, None
         except Exception as error:
             return False, f"{type(error).__name__}: {error}"
+
+    def dispose(self) -> None:
+        """Release pooled connections deterministically."""
+        self.engine.dispose()
