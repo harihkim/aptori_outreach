@@ -28,6 +28,14 @@ _Avoid_: Page, scrape
 A Campaign-specific assessment that a Conversation may merit monitoring, a helpful response, or original content work.
 _Avoid_: Lead, Candidate
 
+**Opportunity Score**:
+The deterministic, formula-versioned aggregate computed by application code from typed analysis factors and Deterministic Signals. A model never sets it directly.
+_Avoid_: AI score, model rating
+
+**Deterministic Signal**:
+A fact computed from the Conversation itself, such as post age or engagement, rather than inferred by an LLM Task.
+_Avoid_: Semantic factor, LLM factor
+
 **Internal Product**:
 A fully implemented, deployable, and product-polished system operated only by the project team. It is neither an external pilot nor evidence that a retrieval provider has passed Retrieval Gate R0.
 _Avoid_: Demo, public beta

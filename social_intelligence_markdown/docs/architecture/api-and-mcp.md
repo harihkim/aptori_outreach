@@ -38,6 +38,8 @@ search_opportunities
 get_opportunity
 ```
 
+The adapter is a streamable-HTTP MCP server mounted at `/mcp` inside the same FastAPI application (see [MCP Tools and Resources](../api/mcp-tools.md)); it is not a separate deployment.
+
 Discovery mutation, creative, review-support, and analytics tools are expansion work. The prototype exposes no MCP Approval, Approved Artifact, Publish Preparation, or arbitrary posting capability.
 
 ## Shared contract rules

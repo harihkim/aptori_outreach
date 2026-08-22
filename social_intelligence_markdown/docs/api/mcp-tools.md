@@ -1,9 +1,15 @@
 # MCP Tools and Resources
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Canonical:** Yes - this Markdown documentation is the source of truth.
 
 MCP is an agent-facing adapter over the same application services and authorization rules as REST. It is neither an alternate system of record nor a second workflow engine.
+
+## Transport
+
+The prototype MCP adapter speaks **streamable HTTP** (the standard remote transport since spec revisions 2025-03-26 / 2025-06-18, which deprecated HTTP+SSE), mounted at `/mcp` inside the existing FastAPI application via the official `mcp` Python SDK's ASGI app — no separate process or stdio entrypoint. Authentication matches REST rules (bearer token for the internal deployment).
+
+Implementation notes from the SDK's tracker: forward the MCP app's lifespan to the parent FastAPI app (otherwise the session manager never starts and every request 404s), and account for trailing-slash redirect behavior when mounting at `/mcp`.
 
 ## Prototype proof
 

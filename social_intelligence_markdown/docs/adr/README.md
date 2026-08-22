@@ -16,6 +16,8 @@ ADRs capture important architectural choices and their consequences. They comple
 | [010](010-separate-approval-from-approved-artifact.md) | Separate Approval decision from Approved Artifact | Accepted |
 | [011](011-isolate-session-backed-retrieval-experiments.md) | Isolate session-backed retrieval experiments; reject Agent Reach as runtime boundary | Accepted |
 | [012](012-time-boxed-internal-retrieval-selection.md) | Time-box Obscura and DuckDuckGo Lite for the internal product | Accepted |
+| [013](013-subprocess-node-retrieval-seam.md) | Invoke the frozen Node retrieval adapters as a subprocess from Python workers | Accepted |
+| [014](014-provider-agnostic-openai-compatible-llm-config.md) | Configure LLM Tasks against any OpenAI-compatible endpoint | Accepted |
 
 ## ADR lifecycle
 
