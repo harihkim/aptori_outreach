@@ -10,8 +10,9 @@
 	let refreshing = $state(false);
 
 	const health = $derived(data.health);
-	const apiLabel = $derived(health.ok ? 'connected' : 'unreachable');
-	const databaseLabel = $derived(health.database ?? 'unknown');
+	const apiLabel = $derived(health.apiReachable ? 'connected' : 'unreachable');
+	const databaseLabel = $derived(health.database);
+	const overallLabel = $derived(health.degraded ? 'degraded' : 'operational');
 
 	async function refresh() {
 		refreshing = true;
@@ -30,14 +31,21 @@
 <div class="flex min-h-svh items-center justify-center p-6">
 	<Card.Root class="w-full max-w-md">
 		<Card.Header>
-			<Card.Title>System status</Card.Title>
+			<div class="flex items-center justify-between">
+				<Card.Title>System status</Card.Title>
+				{#if health.degraded}
+					<Badge variant="destructive">{overallLabel}</Badge>
+				{:else}
+					<Badge variant="secondary">{overallLabel}</Badge>
+				{/if}
+			</div>
 			<Card.Description>Live connectivity between this app and the backend API.</Card.Description>
 		</Card.Header>
 		<Card.Content>
 			<div class="flex flex-col gap-4">
 				<div class="flex items-center justify-between">
 					<span class="text-sm text-muted-foreground">Backend API</span>
-					{#if health.ok}
+					{#if health.apiReachable}
 						<Badge variant="secondary">{apiLabel}</Badge>
 					{:else}
 						<Badge variant="destructive">{apiLabel}</Badge>
@@ -45,13 +53,15 @@
 				</div>
 				<div class="flex items-center justify-between">
 					<span class="text-sm text-muted-foreground">Database</span>
-					{#if health.ok}
+					{#if databaseLabel === 'ok'}
 						<Badge variant="secondary">{databaseLabel}</Badge>
+					{:else if databaseLabel === 'unavailable'}
+						<Badge variant="destructive">{databaseLabel}</Badge>
 					{:else}
 						<Badge variant="outline">{databaseLabel}</Badge>
 					{/if}
 				</div>
-				{#if !health.ok}
+				{#if health.detail}
 					<p class="text-sm text-destructive">{health.detail}</p>
 				{/if}
 			</div>
