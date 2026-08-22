@@ -42,11 +42,19 @@ def clean_campaign_rows(migrated_test_database: str) -> Iterator[None]:
         connection.execute(text("DELETE FROM audit_events"))
         connection.execute(text("DELETE FROM idempotency_events"))
         connection.execute(text("DELETE FROM campaigns"))
-        # Tests may plant foreign workspaces to prove scoping; only the
-        # migration-seeded default survives between tests.
+        # Tests may plant foreign workspaces to prove scoping, and one test
+        # removes the seeded default to prove fail-closed behavior; restore
+        # the seed so suite order never matters.
         connection.execute(
             text("DELETE FROM workspaces WHERE id <> :default"),
             {"default": str(DEFAULT_WORKSPACE_ID)},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO workspaces (id, name) VALUES (:id, 'aptori')"
+                " ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": str(DEFAULT_WORKSPACE_ID)},
         )
 
 
@@ -445,3 +453,22 @@ def test_transition_races_cannot_revive_an_archived_campaign(
     stored = client.get(f"/campaigns/{campaign_id}").json()
     assert stored["status"] == "archived"
     assert stored["archived_at"] is not None
+
+
+def test_requests_fail_closed_when_the_default_workspace_is_missing(
+    client: TestClient, migrated_test_database: str
+) -> None:
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(text("DELETE FROM idempotency_events"))
+        connection.execute(text("DELETE FROM campaigns"))
+        connection.execute(text("DELETE FROM workspaces"))
+
+    listing = client.get("/campaigns")
+    write = client.post(
+        "/campaigns", json=create_payload(), headers=write_headers()
+    )
+
+    assert listing.status_code == 503
+    assert listing.json()["detail"]["code"] == "workspace_unconfigured"
+    assert write.status_code == 503
+    assert write.json()["detail"]["code"] == "workspace_unconfigured"

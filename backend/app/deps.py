@@ -6,7 +6,6 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db import DatabaseSessionManager
@@ -22,21 +21,23 @@ SessionDep = Annotated[Session, Depends(get_session)]
 
 
 def get_default_workspace(session: SessionDep) -> Workspace:
-    """Resolve the single operator workspace, bootstrapping it if absent.
+    """Resolve the migration-seeded operator workspace; read-only.
 
-    The domain migration seeds this row; the idempotent insert only matters
-    for environments that somehow skipped the seed.
+    The domain migration owns seeding this row. A missing row is a broken
+    environment, reported as a fail-closed 503 rather than self-healed by a
+    write on every read (which rolled back anyway after GET requests).
     """
-    session.execute(
-        insert(Workspace)
-        .values(id=DEFAULT_WORKSPACE_ID, name="aptori")
-        .on_conflict_do_nothing(index_elements=[Workspace.id])
-    )
     workspace = session.scalar(
         select(Workspace).where(Workspace.id == DEFAULT_WORKSPACE_ID)
     )
     if workspace is None:
-        raise RuntimeError("default workspace could not be resolved")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "workspace_unconfigured",
+                "message": "The default workspace is missing; run database migrations.",
+            },
+        )
     return workspace
 
 
