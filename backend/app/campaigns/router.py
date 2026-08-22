@@ -26,13 +26,16 @@ def create_campaign(
     fingerprint = _fingerprint("POST", "/campaigns", payload.model_dump(mode="json"))
     replay = _claim(session, workspace.id, key, fingerprint)
     if replay is not None:
-        return JSONResponse(replay.body, status_code=replay.status_code)
+        return _replayed(replay)
     try:
         campaign = service.create_campaign(session, workspace.id, actor, payload)
         code, body = status.HTTP_201_CREATED, _campaign_body(campaign)
-    except HTTPException as error:
-        code, body = error.status_code, {"detail": error.detail}
-    _record(session, workspace.id, key, code, body)
+    except service.CampaignNotFound as error:
+        code, body = _error(status.HTTP_404_NOT_FOUND, "campaign_not_found", "Campaign not found.")
+    if code >= 400:
+        raise HTTPException(status_code=code, detail=body["detail"]) from None
+    idempotency.attach(session, workspace_id=workspace.id, key=key, status_code=code, body=body)
+    session.commit()
     return JSONResponse(body, status_code=code)
 
 
@@ -77,36 +80,39 @@ def update_campaign(
     )
     replay = _claim(session, workspace.id, key, fingerprint)
     if replay is not None:
-        return JSONResponse(replay.body, status_code=replay.status_code)
+        return _replayed(replay)
     try:
         campaign = service.update_campaign(
             session, workspace.id, campaign_id, actor, payload
         )
         code, body = status.HTTP_200_OK, _campaign_body(campaign)
     except service.CampaignNotFound:
-        code, body = status.HTTP_404_NOT_FOUND, {
-            "detail": {"code": "campaign_not_found", "message": "Campaign not found."}
-        }
+        code, body = _error(status.HTTP_404_NOT_FOUND, "campaign_not_found", "Campaign not found.")
     except service.CampaignArchivedError:
-        code, body = status.HTTP_409_CONFLICT, {
-            "detail": {
-                "code": "campaign_archived",
-                "message": "Archived campaigns are read-only.",
-            }
-        }
+        code, body = _error(status.HTTP_409_CONFLICT, "campaign_archived", "Archived campaigns are read-only.")
     except service.InvalidCampaignTransitionError as error:
-        code, body = status.HTTP_409_CONFLICT, {
-            "detail": {
-                "code": "campaign_invalid_transition",
-                "message": f"{error.current} -> {error.requested} is not a legal campaign transition.",
-            }
-        }
-    _record(session, workspace.id, key, code, body)
+        code, body = _error(
+            status.HTTP_409_CONFLICT,
+            "campaign_invalid_transition",
+            f"{error.current} -> {error.requested} is not a legal campaign transition.",
+        )
+    if code >= 400:
+        raise HTTPException(status_code=code, detail=body["detail"]) from None
+    idempotency.attach(session, workspace_id=workspace.id, key=key, status_code=code, body=body)
+    session.commit()
     return JSONResponse(body, status_code=code)
 
 
 def _campaign_body(campaign: Any) -> dict[str, Any]:
     return CampaignResponse.model_validate(campaign).model_dump(mode="json")
+
+
+def _error(code: int, error_code: str, message: str) -> tuple[int, dict[str, Any]]:
+    return code, {"detail": {"code": error_code, "message": message}}
+
+
+def _replayed(replay: idempotency.Replay) -> JSONResponse:
+    return JSONResponse(replay.body, status_code=replay.status_code)
 
 
 def _require_idempotency_key(request: Request) -> str:
@@ -145,27 +151,5 @@ def _claim(
                 "message": "This key was already used for a different request.",
             },
         ) from None
-    except idempotency.KeyInProgressError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "idempotency_key_in_progress",
-                "message": "This key's original request has not finished; retry shortly.",
-            },
-        ) from None
 
 
-def _record(
-    session: SessionDep,
-    workspace_id: UUID,
-    key: str,
-    code: int,
-    body: dict[str, Any],
-) -> None:
-    idempotency.record(
-        session,
-        workspace_id=workspace_id,
-        key=key,
-        status_code=code,
-        body=body,
-    )

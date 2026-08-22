@@ -472,3 +472,35 @@ def test_requests_fail_closed_when_the_default_workspace_is_missing(
     assert listing.json()["detail"]["code"] == "workspace_unconfigured"
     assert write.status_code == 503
     assert write.json()["detail"]["code"] == "workspace_unconfigured"
+
+
+def test_crash_between_mutation_and_commit_rolls_back_and_retries_cleanly(
+    client: TestClient, migrated_test_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.campaigns import router as campaigns_router
+    from app.campaigns import service as campaigns_service
+
+    real_create = campaigns_service.create_campaign
+
+    def crash_after_mutation(*args: Any, **kwargs: Any) -> Any:
+        real_create(*args, **kwargs)  # pending adds only; no commit anymore
+        raise RuntimeError("crash between mutation and commit")
+
+    monkeypatch.setattr(campaigns_service, "create_campaign", crash_after_mutation)
+    key = str(uuid.uuid4())
+    with pytest.raises(RuntimeError):
+        client.post("/campaigns", json=create_payload(), headers=write_headers(key))
+    monkeypatch.undo()
+
+    with create_engine(migrated_test_database).connect() as connection:
+        campaigns = connection.execute(text("SELECT count(*) FROM campaigns")).scalar_one()
+        claims = connection.execute(
+            text("SELECT count(*) FROM idempotency_events")
+        ).scalar_one()
+    assert campaigns == 0
+    assert claims == 0
+
+    retried = client.post("/campaigns", json=create_payload(), headers=write_headers(key))
+
+    assert retried.status_code == 201
+    assert [c["id"] for c in client.get("/campaigns").json()] == [retried.json()["id"]]

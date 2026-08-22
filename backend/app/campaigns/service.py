@@ -36,6 +36,7 @@ class InvalidCampaignTransitionError(ValueError):
 def create_campaign(
     session: Session, workspace_id: uuid.UUID, actor: str, payload: CampaignCreate
 ) -> Campaign:
+    """Stage the creation and its audit row; the caller owns the commit."""
     campaign = Campaign(workspace_id=workspace_id, **payload.model_dump())
     session.add(campaign)
     session.flush()
@@ -47,7 +48,6 @@ def create_campaign(
         target_id=campaign.id,
         after={"status": campaign.status},
     )
-    session.commit()
     return campaign
 
 
@@ -134,7 +134,6 @@ def update_campaign(
             after={"status": requested_status},
         )
 
-    session.commit()
     return campaign
 
 

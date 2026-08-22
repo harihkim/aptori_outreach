@@ -10,11 +10,11 @@ from app.orm import Base
 
 
 class IdempotencyEvent(Base):
-    """One row per (workspace, key): the claim, then the recorded response.
+    """One row per (workspace, key): the request fingerprint and its response.
 
-    status_code is null while the key is claimed but its request has not
-    finished; a crash leaves the key claimed, which deliberately prevents a
-    retry from executing the write twice.
+    Rows become visible only when the whole keyed write committed (claim,
+    domain mutation, recorded response in one transaction), so every
+    committed row carries a replayable response and a crash leaves no row.
     """
 
     __tablename__ = "idempotency_events"
