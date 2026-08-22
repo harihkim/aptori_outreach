@@ -8,16 +8,26 @@
 #
 # Install (WSL Ubuntu, cron must be running: sudo service cron start):
 #   crontab -e
-#   30 5 * * * /home/hari/myroot/intern_aptr/aptori_outreach/retrieval-eval/prototype-smoke/daily-smoke.sh >> /home/hari/myroot/intern_aptr/aptori_outreach/retrieval-eval/prototype-smoke/results/daily/cron.log 2>&1
+#   30 5 * * * /path/to/aptori_outreach/retrieval-eval/prototype-smoke/daily-smoke.sh >> /path/to/aptori_outreach/retrieval-eval/prototype-smoke/results/daily/cron.log 2>&1
+#
+# Environment overrides (defaults keep the reference WSL machine working):
+#   OBSCURA_NODE_DIR  directory holding the pinned Node v20.18.0 toolchain
+#   OBSCURA_BIN       path to the pinned Obscura binary (SHA-256 always verified)
 #
 # Exit codes: 0 passed, 2 gate failed, 3 skipped (dirty worktree), 1 crashed.
 
 set -u
 
-REPO_ROOT="/home/hari/myroot/intern_aptr/aptori_outreach"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SMOKE_DIR="$REPO_ROOT/retrieval-eval/prototype-smoke"
 PKG_DIR="$REPO_ROOT/packages/obscura-retrieval"
-export PATH="/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH"
+# verifyRuntime enforces the exact pinned Node version, so any directory used
+# here must resolve to v20.18.0; otherwise fall back to PATH's node.
+NODE_BIN_DIR="${OBSCURA_NODE_DIR:-/home/hari/.local/node-v20.18.0-linux-x64/bin}"
+if [ -d "$NODE_BIN_DIR" ]; then
+    export PATH="$NODE_BIN_DIR:$PATH"
+fi
 
 LOG_DIR="$SMOKE_DIR/results/daily"
 mkdir -p "$LOG_DIR"

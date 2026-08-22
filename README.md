@@ -26,15 +26,17 @@ Workspace for a Reddit-first **Social Intelligence & Engagement Copilot**: disco
 # Frontend: pnpm on Node >=20.19 (22.x recommended; see frontend/README.md)
 (cd frontend && pnpm install && pnpm dev)                  # http://localhost:5173
 
-# Retrieval adapters: offline tests and the frozen smoke gate (clean worktree required)
-(cd packages/obscura-retrieval && PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm ci && npm test)
-(cd packages/obscura-retrieval && PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm run smoke)
+# Retrieval adapters: offline tests run on any current Node; the frozen smoke
+# gate (clean worktree required) pins Node v20.18.0 via verifyRuntime — use your
+# version manager, or OBSCURA_NODE_DIR for the daily canary.
+(cd packages/obscura-retrieval && npm ci && npm test)
+(cd packages/obscura-retrieval && npm run smoke)
 
 # Daily canary (install once via crontab; see retrieval-eval/prototype-smoke/README.md)
 retrieval-eval/prototype-smoke/daily-smoke.sh
 ```
 
-The Obscura binary is pinned at `/home/hari/.local/bin/obscura` (SHA-256 verified against the committed provider configs).
+The Obscura binary defaults to the reference machine's stable path `/home/hari/.local/bin/obscura` (recorded in the frozen provider configs) and can be relocated with `OBSCURA_BIN`; its SHA-256 is always verified against the committed configs.
 
 ## Documentation entry points
 

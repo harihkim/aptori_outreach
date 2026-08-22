@@ -4,12 +4,13 @@ This directory freezes the smaller Internal Product retrieval gate authorized by
 
 The protocol commit precedes scored results. The runner refuses a dirty worktree, records the clean Git commit SHA and hashes every frozen input/config file. Generated raw evidence and reports live under ignored `results/` directories so result publication can be a separate reviewed decision.
 
-From the package directory in WSL:
+From the package directory on the WSL reference runtime. The offline tests run on any current Node; the smoke gate requires the pinned Node v20.18.0 enforced by `verifyRuntime` (use your version manager, or point `OBSCURA_NODE_DIR` at a directory containing it):
 
 ```bash
-PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm ci
-PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm test
-PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm run smoke
+cd packages/obscura-retrieval
+npm ci
+npm test
+npm run smoke
 ```
 
 The runner executes discovery once and the known-thread corpus twice. Every attempt has its own immutable directory containing `observation.json` and, when received, the raw page or structured response.
@@ -41,11 +42,13 @@ Completeness claims must rest on `sourceTreeExhausted`, never on the counter.
 
 `daily-smoke.sh` runs the frozen gate against clean HEAD and appends one TSV line per attempt to `results/daily/log.tsv`, classifying failures against `expectedNonSuccessThreadIds` so only novel regressions surface as `unexpectedFailures`. It never posts results anywhere; forwarding or alerting is an operator decision.
 
-Install (WSL Ubuntu; cron must be running, e.g. `sudo service cron start`):
+`daily-smoke.sh` derives the repository root from its own location, so it can be installed from any clone. It honors two environment overrides, both defaulting to the reference WSL machine: `OBSCURA_NODE_DIR` (directory holding the pinned Node v20.18.0 toolchain) and `OBSCURA_BIN` (path to the pinned Obscura binary; the default comes from the frozen provider configs and its SHA-256 is always verified).
+
+Install (WSL Ubuntu; cron must be running, e.g. `sudo service cron start`; adjust the path to your clone):
 
 ```text
 crontab -e
-30 5 * * * /home/hari/myroot/intern_aptr/aptori_outreach/retrieval-eval/prototype-smoke/daily-smoke.sh >> /home/hari/myroot/intern_aptr/aptori_outreach/retrieval-eval/prototype-smoke/results/daily/cron.log 2>&1
+30 5 * * * /path/to/aptori_outreach/retrieval-eval/prototype-smoke/daily-smoke.sh >> /path/to/aptori_outreach/retrieval-eval/prototype-smoke/results/daily/cron.log 2>&1
 ```
 
 Exit codes: 0 passed, 2 gate failed, 3 skipped (dirty worktree), 1 crashed before writing a report.
