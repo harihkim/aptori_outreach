@@ -4,8 +4,7 @@ import {
 	explainCampaignError,
 	nextActions,
 	parseCampaignsResponse,
-	parseClaimLines,
-	parseTagInput,
+	parseListLines,
 	type CampaignBody
 } from '$lib/campaigns';
 
@@ -57,24 +56,28 @@ describe('parseCampaignsResponse', () => {
 		});
 	});
 
-	it('defaults absent list fields instead of rejecting the entry', () => {
+	it('treats an absent list field as an unexpected response', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [
-				{
-					...campaignBody,
-					keywords: undefined,
-					competitors: undefined,
-					approved_claims: undefined,
-					prohibited_claims: undefined
-				}
-			]
+			body: [{ ...campaignBody, keywords: undefined }]
 		});
 
-		expect(state.campaigns[0]?.keywords).toEqual([]);
-		expect(state.campaigns[0]?.competitors).toEqual([]);
-		expect(state.campaigns[0]?.approvedClaims).toEqual([]);
-		expect(state.campaigns[0]?.prohibitedClaims).toEqual([]);
+		expect(state.campaigns).toEqual([]);
+		expect(state.detail).toBe('Unexpected response (HTTP 200)');
+	});
+
+	it('treats a missing workspace id or updated_at as an unexpected response', () => {
+		const noWorkspace = parseCampaignsResponse({
+			httpStatus: 200,
+			body: [{ ...campaignBody, workspace_id: undefined }]
+		});
+		const noUpdated = parseCampaignsResponse({
+			httpStatus: 200,
+			body: [{ ...campaignBody, updated_at: undefined }]
+		});
+
+		expect(noWorkspace.campaigns).toEqual([]);
+		expect(noUpdated.campaigns).toEqual([]);
 	});
 
 	it('treats an entry with an unknown status as an unexpected response', () => {
@@ -133,19 +136,7 @@ describe('nextActions', () => {
 	});
 });
 
-describe('parseTagInput', () => {
-	it('splits comma input, strips whitespace, and drops empties', () => {
-		expect(parseTagInput('API security, pentest ,, CIEM ')).toEqual([
-			'API security',
-			'pentest',
-			'CIEM'
-		]);
-	});
 
-	it('returns an empty list for blank input', () => {
-		expect(parseTagInput('  ')).toEqual([]);
-	});
-});
 
 describe('explainCampaignError', () => {
 	it('translates stable backend error codes into operator guidance', () => {
@@ -166,21 +157,39 @@ describe('explainCampaignError', () => {
 		).toBe('Campaign not found.');
 	});
 
+	it('guides operators through the new auth and idempotency errors', () => {
+		expect(explainCampaignError(401, { detail: { code: 'unauthorized' } })).toBe(
+			'The backend rejected the request token.'
+		);
+		expect(
+			explainCampaignError(503, { detail: { code: 'api_token_unconfigured' } })
+		).toBe('The backend has no API token configured.');
+		expect(
+			explainCampaignError(503, { detail: { code: 'workspace_unconfigured' } })
+		).toBe('The backend database needs its migrations run.');
+		expect(
+			explainCampaignError(400, { detail: { code: 'idempotency_key_required' } })
+		).toBe('The form lost its submission key; refresh and try again.');
+		expect(
+			explainCampaignError(409, { detail: { code: 'idempotency_key_conflict' } })
+		).toBe('This submission key was already used for different content.');
+	});
+
 	it('falls back to a generic message for unknown failures', () => {
 		expect(explainCampaignError(422, { detail: [] })).toBe('Some fields were invalid.');
 		expect(explainCampaignError(500, null)).toBe('Unexpected error (HTTP 500).');
 	});
 });
 
-describe('parseClaimLines', () => {
-	it('splits claim input on lines and keeps commas inside a claim', () => {
-		expect(parseClaimLines('SOC 2, Type II certified\nAptori runs in CI \n')).toEqual([
-			'SOC 2, Type II certified',
-			'Aptori runs in CI'
+describe('parseListLines', () => {
+	it('splits list input on lines and keeps commas inside a value', () => {
+		expect(parseListLines('Acme, Inc.\nBurp Suite \n')).toEqual([
+			'Acme, Inc.',
+			'Burp Suite'
 		]);
 	});
 
 	it('returns an empty list for blank input', () => {
-		expect(parseClaimLines('  ')).toEqual([]);
+		expect(parseListLines('  ')).toEqual([]);
 	});
 });

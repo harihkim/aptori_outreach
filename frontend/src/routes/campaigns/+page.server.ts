@@ -6,8 +6,7 @@ import type { Actions, PageServerLoad } from './$types';
 import {
 	explainCampaignError,
 	parseCampaignsResponse,
-	parseClaimLines,
-	parseTagInput
+	parseListLines
 } from '$lib/campaigns';
 
 const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -18,29 +17,45 @@ async function callApi(
 	method: string,
 	path: string,
 	payload: unknown,
-	{ write = false, timeoutMs = 5000 }: { write?: boolean; timeoutMs?: number } = {}
+	{
+		write = false,
+		timeoutMs = 5000,
+		idempotencyKey = crypto.randomUUID()
+	}: { write?: boolean; timeoutMs?: number; idempotencyKey?: string } = {}
 ): Promise<ApiResult> {
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
 	// Every request carries the deployment bearer token when configured;
-	// writes additionally require a fresh idempotency key.
+	// writes carry the caller's idempotency key so a retry of the same
+	// submission replays the original result instead of duplicating it.
 	if (env.API_TOKEN) {
 		headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
 	}
 	if (write) {
-		headers['Idempotency-Key'] = crypto.randomUUID();
+		headers['Idempotency-Key'] = idempotencyKey;
 	}
-	try {
-		const response = await fetch(`${apiBaseUrl}${path}`, {
-			method,
-			headers,
-			body: payload === null ? null : JSON.stringify(payload),
-			signal: AbortSignal.timeout(timeoutMs)
-		});
-		const body = await response.json().catch(() => null);
-		return { ok: response.ok, status: response.status, body };
-	} catch {
-		return { ok: false, status: 0, body: null };
+
+	async function attempt(): Promise<ApiResult> {
+		try {
+			const response = await fetch(`${apiBaseUrl}${path}`, {
+				method,
+				headers,
+				body: payload === null ? null : JSON.stringify(payload),
+				signal: AbortSignal.timeout(timeoutMs)
+			});
+			const body = await response.json().catch(() => null);
+			return { ok: response.ok, status: response.status, body };
+		} catch {
+			return { ok: false, status: 0, body: null };
+		}
 	}
+
+	const first = await attempt();
+	// One same-key retry when the network failed: the write may have landed,
+	// and the key makes the retry safe either way.
+	if (write && !first.ok && first.status === 0) {
+		return attempt();
+	}
+	return first;
 }
 
 function explain(result: ApiResult): string {
@@ -59,12 +74,14 @@ function optionalText(form: FormData, field: string): string | null {
 	return value === '' ? null : value;
 }
 
-function tagList(form: FormData, field: string): string[] {
-	return parseTagInput(String(form.get(field) ?? ''));
+function lineList(form: FormData, field: string): string[] {
+	return parseListLines(String(form.get(field) ?? ''));
 }
 
-function claimList(form: FormData, field: string): string[] {
-	return parseClaimLines(String(form.get(field) ?? ''));
+/** The submission's idempotency key: reused across retries of one submission. */
+function submissionKey(form: FormData): string {
+	const provided = String(form.get('idempotency_key') ?? '').trim();
+	return provided || crypto.randomUUID();
 }
 
 /** The full editable Campaign contract, identical for create and update. */
@@ -73,11 +90,11 @@ function campaignPayload(form: FormData): Record<string, string | string[] | nul
 		name: requiredText(form, 'name'),
 		product_context: optionalText(form, 'product_context'),
 		icp: optionalText(form, 'icp'),
-		keywords: tagList(form, 'keywords'),
-		subreddits: tagList(form, 'subreddits'),
-		competitors: tagList(form, 'competitors'),
-		approved_claims: claimList(form, 'approved_claims'),
-		prohibited_claims: claimList(form, 'prohibited_claims'),
+		keywords: lineList(form, 'keywords'),
+		subreddits: lineList(form, 'subreddits'),
+		competitors: lineList(form, 'competitors'),
+		approved_claims: lineList(form, 'approved_claims'),
+		prohibited_claims: lineList(form, 'prohibited_claims'),
 		promotion_posture: requiredText(form, 'promotion_posture')
 	};
 }
@@ -93,37 +110,45 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 export const actions: Actions = {
 	create: async ({ request }) => {
 		const form = await request.formData();
-		const result = await callApi('POST', '/campaigns', campaignPayload(form), { write: true });
+		const key = submissionKey(form);
+		const result = await callApi('POST', '/campaigns', campaignPayload(form), {
+			write: true,
+			idempotencyKey: key
+		});
 		if (!result.ok) {
-			return fail(400, { message: explain(result) });
+			// The key rides back to the form so a resubmission replays
+			// this attempt instead of creating a second Campaign.
+			return fail(400, { message: explain(result), idempotency_key: key });
 		}
 		return { created: true };
 	},
 
 	update: async ({ request }) => {
 		const form = await request.formData();
+		const key = submissionKey(form);
 		const result = await callApi(
 			'PATCH',
 			`/campaigns/${requiredText(form, 'campaign_id')}`,
 			campaignPayload(form),
-			{ write: true }
+			{ write: true, idempotencyKey: key }
 		);
 		if (!result.ok) {
-			return fail(400, { message: explain(result) });
+			return fail(400, { message: explain(result), idempotency_key: key });
 		}
 		return { updated: true };
 	},
 
 	transition: async ({ request }) => {
 		const form = await request.formData();
+		const key = submissionKey(form);
 		const result = await callApi(
 			'PATCH',
 			`/campaigns/${requiredText(form, 'campaign_id')}`,
 			{ status: requiredText(form, 'status') },
-			{ write: true }
+			{ write: true, idempotencyKey: key }
 		);
 		if (!result.ok) {
-			return fail(400, { message: explain(result) });
+			return fail(400, { message: explain(result), idempotency_key: key });
 		}
 		return { transitioned: true };
 	}

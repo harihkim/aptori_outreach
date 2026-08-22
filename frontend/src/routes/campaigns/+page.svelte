@@ -36,6 +36,14 @@
 	function fieldId(field: string, suffix: string): string {
 		return suffix === '' ? field : `${field}-${suffix}`;
 	}
+
+	// A failed submission echoes its key back so retrying replays it instead
+	// of creating a second write; fresh keys otherwise.
+	let submissionKey = $derived(
+		form && 'idempotency_key' in form && typeof form.idempotency_key === 'string'
+			? form.idempotency_key
+			: crypto.randomUUID()
+	);
 </script>
 
 <svelte:head>
@@ -61,18 +69,19 @@
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('keywords', suffix)} class="text-sm font-medium">Keywords</label>
-		<input id={fieldId('keywords', suffix)} name="keywords" class="input"
-			placeholder="API security, pentest, CIEM" value={campaign?.keywords.join(', ') ?? ''} />
+		<textarea id={fieldId('keywords', suffix)} name="keywords" rows="2" class="input"
+			placeholder="One keyword per line" value={campaign?.keywords.join('\n') ?? ''}></textarea>
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('subreddits', suffix)} class="text-sm font-medium">Subreddits</label>
-		<input id={fieldId('subreddits', suffix)} name="subreddits" class="input"
-			placeholder="cybersecurity, netsec" value={campaign?.subreddits.join(', ') ?? ''} />
+		<textarea id={fieldId('subreddits', suffix)} name="subreddits" rows="2" class="input"
+			placeholder="One subreddit per line" value={campaign?.subreddits.join('\n') ?? ''}></textarea>
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('competitors', suffix)} class="text-sm font-medium">Competitors</label>
-		<input id={fieldId('competitors', suffix)} name="competitors" class="input"
-			placeholder="Burp Suite, OWASP ZAP" value={campaign?.competitors.join(', ') ?? ''} />
+		<textarea id={fieldId('competitors', suffix)} name="competitors" rows="2" class="input"
+			placeholder="One competitor per line - names may contain commas"
+			value={campaign?.competitors.join('\n') ?? ''}></textarea>
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('approved_claims', suffix)} class="text-sm font-medium">Approved claims</label>
@@ -126,6 +135,7 @@
 		</Card.Header>
 		<Card.Content>
 			<form method="POST" action="?/create" class="grid gap-4">
+				<input type="hidden" name="idempotency_key" value={submissionKey} />
 				{@render formFields('', null)}
 				<Button type="submit">Create campaign</Button>
 			</form>
@@ -161,6 +171,7 @@
 							{#each nextActions(campaign.status) as action (action.status)}
 								<form method="POST" action="?/transition">
 									<input type="hidden" name="campaign_id" value={campaign.id} />
+									<input type="hidden" name="idempotency_key" value={submissionKey} />
 									<input type="hidden" name="status" value={action.status} />
 									<Button
 										type="submit"
@@ -176,6 +187,7 @@
 							<summary class="cursor-pointer text-sm text-muted-foreground">Edit</summary>
 							<form method="POST" action="?/update" class="mt-3 grid gap-4">
 								<input type="hidden" name="campaign_id" value={campaign.id} />
+								<input type="hidden" name="idempotency_key" value={submissionKey} />
 								{@render formFields(campaign.id, campaign)}
 								<Button type="submit" variant="outline" size="sm">Save changes</Button>
 							</form>

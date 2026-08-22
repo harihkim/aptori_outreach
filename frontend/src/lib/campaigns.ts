@@ -7,11 +7,11 @@ export type CampaignBody = {
 	name: string;
 	product_context: string | null;
 	icp: string | null;
-	keywords?: string[];
-	subreddits?: string[];
-	competitors?: string[];
-	approved_claims?: string[];
-	prohibited_claims?: string[];
+	keywords: string[];
+	subreddits: string[];
+	competitors: string[];
+	approved_claims: string[];
+	prohibited_claims: string[];
 	promotion_posture: string;
 	status: string;
 	created_at: string;
@@ -55,9 +55,7 @@ function isPromotionPosture(value: string): value is PromotionPosture {
 	return (POSTURES as string[]).includes(value);
 }
 
-function stringList(value: string[] | undefined): string[] {
-	return Array.isArray(value) ? value : [];
-}
+const LIST_FIELDS = ['keywords', 'subreddits', 'competitors', 'approved_claims', 'prohibited_claims'] as const;
 
 function isStringList(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === 'string');
@@ -109,11 +107,11 @@ export function parseCampaignsResponse({
 			promotionPosture: entry.promotion_posture,
 			productContext: entry.product_context,
 			icp: entry.icp,
-			keywords: stringList(entry.keywords),
-			subreddits: stringList(entry.subreddits),
-			competitors: stringList(entry.competitors),
-			approvedClaims: stringList(entry.approved_claims),
-			prohibitedClaims: stringList(entry.prohibited_claims),
+			keywords: entry.keywords,
+			subreddits: entry.subreddits,
+			competitors: entry.competitors,
+			approvedClaims: entry.approved_claims,
+			prohibitedClaims: entry.prohibited_claims,
 			createdAt: entry.created_at,
 			archivedAt: entry.archived_at
 		});
@@ -127,19 +125,20 @@ function isCampaignBody(value: unknown): value is ValidatedCampaignBody {
 		return false;
 	}
 	const entry = value as Record<string, unknown>;
-	const listFields = ['keywords', 'subreddits', 'competitors', 'approved_claims', 'prohibited_claims'];
 	return (
 		typeof entry.id === 'string' &&
+		typeof entry.workspace_id === 'string' &&
 		typeof entry.name === 'string' &&
 		typeof entry.status === 'string' &&
 		isCampaignStatus(entry.status) &&
 		typeof entry.promotion_posture === 'string' &&
 		isPromotionPosture(entry.promotion_posture) &&
 		typeof entry.created_at === 'string' &&
+		typeof entry.updated_at === 'string' &&
 		(entry.archived_at === null || typeof entry.archived_at === 'string') &&
 		(entry.product_context === null || typeof entry.product_context === 'string') &&
 		(entry.icp === null || typeof entry.icp === 'string') &&
-		listFields.every((field) => entry[field] === undefined || isStringList(entry[field]))
+		LIST_FIELDS.every((field) => isStringList(entry[field]))
 	);
 }
 
@@ -163,19 +162,11 @@ export function nextActions(status: CampaignStatus): LifecycleAction[] {
 	}
 }
 
-/** Split comma-separated operator input into clean tag lists for the API. */
-export function parseTagInput(value: string): string[] {
-	return value
-		.split(',')
-		.map((item) => item.trim())
-		.filter((item) => item.length > 0);
-}
-
 /**
- * Split claim input one claim per line. Claims routinely contain commas
- * ("SOC 2, Type II certified"), so they must never split on commas.
+ * Split list input one value per line. Values may contain commas
+ * ("Acme, Inc.", "SOC 2, Type II certified"), so lists never split on commas.
  */
-export function parseClaimLines(value: string): string[] {
+export function parseListLines(value: string): string[] {
 	return value
 		.split(/\r?\n/)
 		.map((item) => item.trim())
@@ -192,6 +183,16 @@ export function explainCampaignError(httpStatus: number, body: unknown): string 
 			return 'Archived campaigns are read-only.';
 		case 'campaign_not_found':
 			return 'Campaign not found.';
+		case 'unauthorized':
+			return 'The backend rejected the request token.';
+		case 'api_token_unconfigured':
+			return 'The backend has no API token configured.';
+		case 'workspace_unconfigured':
+			return 'The backend database needs its migrations run.';
+		case 'idempotency_key_required':
+			return 'The form lost its submission key; refresh and try again.';
+		case 'idempotency_key_conflict':
+			return 'This submission key was already used for different content.';
 	}
 	if (httpStatus === 422) {
 		return 'Some fields were invalid.';

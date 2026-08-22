@@ -107,7 +107,10 @@ describe('campaigns/+page.svelte', () => {
 	it('surfaces action failures returned by the form actions', () => {
 		render(Page, {
 			data: { apiReachable: true, detail: null, campaigns: [] },
-			form: { message: 'That lifecycle change is not allowed.' }
+			form: {
+				message: 'That lifecycle change is not allowed.',
+				idempotency_key: 'transition-key'
+			}
 		});
 
 		expect(screen.getByText('That lifecycle change is not allowed.')).toBeInTheDocument();
@@ -126,12 +129,26 @@ describe('campaigns/+page.svelte', () => {
 		expect(screen.queryByText('No campaigns yet.')).not.toBeInTheDocument();
 	});
 
-	it('collects claims one per line', () => {
+	it('edits every list one value per line', () => {
 		render(Page, { data: { apiReachable: true, detail: null, campaigns: [] } });
 
 		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
-		expect(within(createForm).getByLabelText('Approved claims').tagName).toBe('TEXTAREA');
-		expect(within(createForm).getByLabelText('Prohibited claims').tagName).toBe('TEXTAREA');
+		for (const label of ['Keywords', 'Subreddits', 'Competitors', 'Approved claims', 'Prohibited claims']) {
+			expect(within(createForm).getByLabelText(label).tagName).toBe('TEXTAREA');
+		}
+	});
+
+	it('keeps a stable submission key across a failed submission', () => {
+		render(Page, {
+			data: { apiReachable: true, detail: null, campaigns: [] },
+			form: { message: 'Backend did not answer.', idempotency_key: 'stable-key' }
+		});
+
+		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
+		const hidden = createForm.querySelector(
+			'input[name="idempotency_key"]'
+		) as HTMLInputElement;
+		expect(hidden.value).toBe('stable-key');
 	});
 
 	it('explains when the backend is unreachable', () => {
