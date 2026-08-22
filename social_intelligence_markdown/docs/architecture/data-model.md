@@ -10,7 +10,7 @@ PostgreSQL is the system of record. This is a persistence contract for the aggre
 | Entity | Important fields and relationships |
 |---|---|
 | Workspace | `id`, `name`, `settings` |
-| Campaign | `workspace_id`, `name`, `product_context`, `icp`, `keywords`, `subreddits`, `competitors`, `promotion_posture`, `status` |
+| Campaign | `workspace_id`, `name`, `product_context`, `icp`, `keywords`, `subreddits`, `competitors`, `approved_claims`, `prohibited_claims`, `promotion_posture`, `status` |
 | DiscoveryRun | `campaign_id`, frozen query/config, provider plan, `started_at`, `completed_at`, metrics, `status` |
 | RetrievalObservation | `discovery_run_id`, provider variant/method/version and config SHA-256, access-identity class and egress environment, source/final URL, external source ID, `fetched_at`, result status, response/rate metadata, attempt and network counters, billable-unit/cost breakdown, raw artifact reference and SHA-256, extractor version, normalized SHA-256, completeness, failure reason |
 | SourceItem | source, external ID/fullname, canonical URL, author, community, source timestamps, deletion/tombstone state, latest observed metadata |

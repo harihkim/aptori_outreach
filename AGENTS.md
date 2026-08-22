@@ -2,9 +2,12 @@
 
 ## Tooling
 
-Run all JavaScript tooling through pnpm — `pnpm <script>`, `pnpm dlx <bin>` —
-so installs and versions match the pinned `packageManager`. Use npm/npx
-nowhere: they bypass the pnpm lockfile.
+In pnpm-managed JavaScript (the `frontend/` workspace), run everything through
+pnpm — `pnpm <script>`, `pnpm dlx <bin>` — so installs and versions match the
+pinned `packageManager`. `packages/obscura-retrieval/` is the exception: its
+ADR-012 reference runtime pins Node 20.18.0, below pnpm 11's floor, so it keeps
+its npm toolchain (`npm ci`, `npm test`). Use npm/npx nowhere else: they bypass
+the pnpm lockfile.
 
 ## Agent skills
 
