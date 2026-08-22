@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 
@@ -12,8 +11,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.schemas import HealthResponse
-
-logger = logging.getLogger(__name__)
 
 DATABASE_UNAVAILABLE_DETAIL = "database unavailable"
 
@@ -41,10 +38,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
         },
     )
     def health() -> HealthResponse | JSONResponse:
-        healthy, failure = manager.probe()
+        healthy, _diagnostic = manager.probe()
         if not healthy:
-            # Classified diagnostics stay in logs; clients get a constant.
-            logger.warning("Health probe failed: %s", failure)
             return JSONResponse(
                 status_code=503,
                 content=HealthResponse(

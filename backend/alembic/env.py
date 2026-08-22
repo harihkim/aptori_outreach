@@ -7,7 +7,9 @@ from app.config import get_settings
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False keeps application loggers (e.g. app.db)
+    # working after migrations run inside the same interpreter (tests).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Callers (tests, CLI wrappers) may pin the target database explicitly;
 # otherwise fall back to application settings.
