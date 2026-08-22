@@ -1,8 +1,12 @@
-from collections.abc import Generator, Iterator
+import logging
+import uuid
+from collections.abc import Generator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, make_url, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseSessionManager:
@@ -20,18 +24,38 @@ class DatabaseSessionManager:
         finally:
             session.close()
 
+    def _safe_target(self) -> str:
+        """Password-free host/database summary of the configured URL."""
+        try:
+            url = make_url(self.database_url)
+        except Exception:
+            return "<unparseable-url>"
+        host = url.host or "<local-socket>"
+        database = url.database or "<none>"
+        return f"{host}/{database}"
+
     def probe(self) -> tuple[bool, str | None]:
         """Round-trip the engine's pool.
 
-        Returns (healthy, failure_reason). The failure reason may contain
-        connection details — log it, never send it to clients.
+        Returns (healthy, diagnostic). Diagnostics are constructed only from
+        the exception class name, a probe id, and a password-free URL summary;
+        raw exception text is never included, so they are safe to log.
         """
+        probe_id = uuid.uuid4().hex[:8]
+        target = self._safe_target()
         try:
             with self.engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
             return True, None
         except Exception as error:
-            return False, f"{type(error).__name__}: {error}"
+            classification = type(error).__name__
+            logger.warning(
+                "Health probe failed: %s against %s (probe %s)",
+                classification,
+                target,
+                probe_id,
+            )
+            return False, f"{classification} against {target} (probe {probe_id})"
 
     def dispose(self) -> None:
         """Release pooled connections deterministically."""
