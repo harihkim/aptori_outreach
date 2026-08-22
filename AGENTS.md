@@ -1,5 +1,11 @@
 # aptori_outreach — agent notes
 
+## Tooling
+
+Run all JavaScript tooling through pnpm — `pnpm <script>`, `pnpm dlx <bin>` —
+so installs and versions match the pinned `packageManager`. Use npm/npx
+nowhere: they bypass the pnpm lockfile.
+
 ## Agent skills
 
 ### Issue tracker
