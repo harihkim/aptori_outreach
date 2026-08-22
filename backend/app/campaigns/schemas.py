@@ -96,3 +96,12 @@ class CampaignResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    detail: ErrorBody

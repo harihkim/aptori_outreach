@@ -18,23 +18,23 @@ async function callApi(
 	method: string,
 	path: string,
 	payload: unknown,
-	{ write = false }: { write?: boolean } = {}
+	{ write = false, timeoutMs = 5000 }: { write?: boolean; timeoutMs?: number } = {}
 ): Promise<ApiResult> {
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
+	// Every request carries the deployment bearer token when configured;
+	// writes additionally require a fresh idempotency key.
+	if (env.API_TOKEN) {
+		headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
+	}
 	if (write) {
-		// Writes require the deployment bearer token and a fresh idempotency
-		// key; each form submission is a distinct request.
-		if (env.API_TOKEN) {
-			headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
-		}
 		headers['Idempotency-Key'] = crypto.randomUUID();
 	}
 	try {
 		const response = await fetch(`${apiBaseUrl}${path}`, {
 			method,
 			headers,
-			body: JSON.stringify(payload),
-			signal: AbortSignal.timeout(5000)
+			body: payload === null ? null : JSON.stringify(payload),
+			signal: AbortSignal.timeout(timeoutMs)
 		});
 		const body = await response.json().catch(() => null);
 		return { ok: response.ok, status: response.status, body };
@@ -85,19 +85,9 @@ function campaignPayload(form: FormData): Record<string, string | string[] | nul
 export const load: PageServerLoad = async ({ fetch, depends }) => {
 	depends('app:campaigns');
 
-	let httpStatus: number | null = null;
-	let body: unknown = null;
-	try {
-		const response = await fetch(`${apiBaseUrl}/campaigns`, {
-			signal: AbortSignal.timeout(3000)
-		});
-		httpStatus = response.status;
-		body = await response.json().catch(() => null);
-	} catch {
-		httpStatus = null;
-	}
+	const result = await callApi('GET', '/campaigns', null, { timeoutMs: 3000 });
 
-	return parseCampaignsResponse({ httpStatus, body });
+	return parseCampaignsResponse({ httpStatus: result.status || null, body: result.body });
 };
 
 export const actions: Actions = {

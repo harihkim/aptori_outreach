@@ -3,43 +3,73 @@ import json
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Path, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 
 from app.campaigns import service
-from app.campaigns.schemas import CampaignCreate, CampaignResponse, CampaignUpdate
-from app.deps import SessionDep, WorkspaceDep, WritePrincipalDep
+from app.campaigns.schemas import (
+    CampaignCreate,
+    CampaignResponse,
+    CampaignUpdate,
+    ErrorResponse,
+)
+from app.deps import PrincipalDep, SessionDep, WorkspaceDep, require_principal
 from app.idempotency import service as idempotency
 
-router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+router = APIRouter(
+    prefix="/campaigns", tags=["campaigns"], dependencies=[Depends(require_principal)]
+)
+
+_IDEMPOTENCY_HEADER = {
+    "description": "Unique key for this write; replays return the original result."
+}
+
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"model": ErrorResponse, "description": "Malformed write request."},
+    401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
+    404: {"model": ErrorResponse, "description": "Campaign not found."},
+    409: {"model": ErrorResponse, "description": "Conflicting state or key."},
+    503: {"model": ErrorResponse, "description": "API token or workspace unconfigured."},
+}
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        **_ERROR_RESPONSES,
+        201: {
+            "model": CampaignResponse,
+            "description": "Created Campaign.",
+            "headers": {"Idempotency-Key": _IDEMPOTENCY_HEADER},
+        },
+    },
+)
 def create_campaign(
-    request: Request,
     payload: CampaignCreate,
     session: SessionDep,
     workspace: WorkspaceDep,
-    actor: WritePrincipalDep,
-) -> JSONResponse:
-    key = _require_idempotency_key(request)
+    actor: PrincipalDep,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> CampaignResponse:
+    key = _required_key(idempotency_key)
     fingerprint = _fingerprint("POST", "/campaigns", payload.model_dump(mode="json"))
     replay = _claim(session, workspace.id, key, fingerprint)
     if replay is not None:
         return _replayed(replay)
-    try:
-        campaign = service.create_campaign(session, workspace.id, actor, payload)
-        code, body = status.HTTP_201_CREATED, _campaign_body(campaign)
-    except service.CampaignNotFound as error:
-        code, body = _error(status.HTTP_404_NOT_FOUND, "campaign_not_found", "Campaign not found.")
-    if code >= 400:
-        raise HTTPException(status_code=code, detail=body["detail"]) from None
-    idempotency.attach(session, workspace_id=workspace.id, key=key, status_code=code, body=body)
+    campaign = service.create_campaign(session, workspace.id, actor, payload)
+    # Load server-generated values (created_at/updated_at) so the recorded
+    # replay body is byte-identical to the live response.
+    session.flush()
+    session.refresh(campaign)
+    body = _campaign_body(campaign)
+    idempotency.attach(
+        session, workspace_id=workspace.id, key=key, status_code=201, body=body
+    )
     session.commit()
-    return JSONResponse(body, status_code=code)
+    return CampaignResponse.model_validate(campaign)
 
 
-@router.get("")
+@router.get("", responses=_ERROR_RESPONSES)
 def list_campaigns(
     session: SessionDep, workspace: WorkspaceDep
 ) -> list[CampaignResponse]:
@@ -49,30 +79,37 @@ def list_campaigns(
     ]
 
 
-@router.get("/{campaign_id}")
+@router.get("/{campaign_id}", responses=_ERROR_RESPONSES)
 def get_campaign(
     campaign_id: Annotated[UUID, Path()], session: SessionDep, workspace: WorkspaceDep
 ) -> CampaignResponse:
     try:
         campaign = service.get_campaign(session, workspace.id, campaign_id)
     except service.CampaignNotFound:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "campaign_not_found", "message": "Campaign not found."},
-        ) from None
+        raise _not_found() from None
     return CampaignResponse.model_validate(campaign)
 
 
-@router.patch("/{campaign_id}")
+@router.patch(
+    "/{campaign_id}",
+    responses={
+        **_ERROR_RESPONSES,
+        200: {
+            "model": CampaignResponse,
+            "description": "Updated Campaign.",
+            "headers": {"Idempotency-Key": _IDEMPOTENCY_HEADER},
+        },
+    },
+)
 def update_campaign(
-    request: Request,
     campaign_id: Annotated[UUID, Path()],
     payload: CampaignUpdate,
     session: SessionDep,
     workspace: WorkspaceDep,
-    actor: WritePrincipalDep,
-) -> JSONResponse:
-    key = _require_idempotency_key(request)
+    actor: PrincipalDep,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> CampaignResponse:
+    key = _required_key(idempotency_key)
     fingerprint = _fingerprint(
         "PATCH",
         f"/campaigns/{campaign_id}",
@@ -85,45 +122,44 @@ def update_campaign(
         campaign = service.update_campaign(
             session, workspace.id, campaign_id, actor, payload
         )
-        code, body = status.HTTP_200_OK, _campaign_body(campaign)
     except service.CampaignNotFound:
-        code, body = _error(status.HTTP_404_NOT_FOUND, "campaign_not_found", "Campaign not found.")
+        raise _not_found() from None
     except service.CampaignArchivedError:
-        code, body = _error(status.HTTP_409_CONFLICT, "campaign_archived", "Archived campaigns are read-only.")
+        raise _http_conflict(
+            "campaign_archived", "Archived campaigns are read-only."
+        ) from None
     except service.InvalidCampaignTransitionError as error:
-        code, body = _error(
-            status.HTTP_409_CONFLICT,
+        raise _http_conflict(
             "campaign_invalid_transition",
             f"{error.current} -> {error.requested} is not a legal campaign transition.",
-        )
-    if code >= 400:
-        raise HTTPException(status_code=code, detail=body["detail"]) from None
-    idempotency.attach(session, workspace_id=workspace.id, key=key, status_code=code, body=body)
+        ) from None
+    session.flush()
+    session.refresh(campaign)
+    body = _campaign_body(campaign)
+    idempotency.attach(
+        session, workspace_id=workspace.id, key=key, status_code=200, body=body
+    )
     session.commit()
-    return JSONResponse(body, status_code=code)
+    return CampaignResponse.model_validate(campaign)
 
 
 def _campaign_body(campaign: Any) -> dict[str, Any]:
     return CampaignResponse.model_validate(campaign).model_dump(mode="json")
 
 
-def _error(code: int, error_code: str, message: str) -> tuple[int, dict[str, Any]]:
-    return code, {"detail": {"code": error_code, "message": message}}
+def _replayed(replay: idempotency.Replay) -> CampaignResponse:
+    return CampaignResponse.model_validate(replay.body)
 
 
-def _replayed(replay: idempotency.Replay) -> JSONResponse:
-    return JSONResponse(replay.body, status_code=replay.status_code)
-
-
-def _require_idempotency_key(request: Request) -> str:
-    key = request.headers.get("Idempotency-Key", "").strip()
+def _required_key(idempotency_key: str | None) -> str:
+    key = (idempotency_key or "").strip()
     if not key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "idempotency_key_required",
-                "message": "Writes require an Idempotency-Key header.",
-            },
+            detail=_error_body(
+                "idempotency_key_required",
+                "Writes require an Idempotency-Key header.",
+            ),
         )
     return key[:200]
 
@@ -144,12 +180,24 @@ def _claim(
             request_fingerprint=fingerprint,
         )
     except idempotency.KeyConflictError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "idempotency_key_conflict",
-                "message": "This key was already used for a different request.",
-            },
+        raise _http_conflict(
+            "idempotency_key_conflict",
+            "This key was already used for a different request.",
         ) from None
 
 
+def _error_body(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=_error_body("campaign_not_found", "Campaign not found."),
+    )
+
+
+def _http_conflict(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT, detail=_error_body(code, message)
+    )

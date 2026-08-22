@@ -44,15 +44,15 @@ def get_default_workspace(session: SessionDep) -> Workspace:
 WorkspaceDep = Annotated[Workspace, Depends(get_default_workspace)]
 
 
-def require_write_principal(request: Request) -> str:
-    """Authenticate mutating requests with the deployment's bearer token.
+def require_principal(request: Request) -> str:
+    """Authenticate every request with the deployment's bearer token.
 
     Returns the actor label recorded on audit rows. A single internal token
     authenticates a single internal principal for now; the review/approval
     slice replaces this with per-human identity.
     """
     token = request.app.state.api_token
-    if token is None:
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -66,10 +66,10 @@ def require_write_principal(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "code": "unauthorized",
-                "message": "A valid bearer token is required for writes.",
+                "message": "A valid bearer token is required.",
             },
         )
     return "operator"
 
 
-WritePrincipalDep = Annotated[str, Depends(require_write_principal)]
+PrincipalDep = Annotated[str, Depends(require_principal)]
