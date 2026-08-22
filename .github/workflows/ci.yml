@@ -50,7 +50,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-        # Reads the pinned pnpm version from frontend/package.json (packageManager).
+        with:
+          # Reads the pinned pnpm version from packageManager (no root package.json).
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v5
         with:
           node-version: 22
