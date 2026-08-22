@@ -384,3 +384,19 @@ def test_transition_replay_returns_the_original_response_without_duplicate_audit
         if event.action == "campaign.transitioned"
     ]
     assert len(transitions) == 1
+
+
+def test_patch_rejects_explicit_null_fields(client: TestClient) -> None:
+    created = created_campaign(client)
+    campaign_id = created["id"]
+
+    for field in ("name", "keywords", "promotion_posture", "status", "product_context"):
+        response = client.patch(
+            f"/campaigns/{campaign_id}",
+            json={field: None},
+            headers=write_headers(),
+        )
+        assert response.status_code == 422, field
+
+    # Nothing slipped through to the stored campaign.
+    assert client.get(f"/campaigns/{campaign_id}").json() == created

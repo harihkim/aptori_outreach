@@ -2,7 +2,14 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 PromotionPosture = Literal["expertise_first", "balanced", "high_intent_only"]
 CampaignStatus = Literal["draft", "active", "paused", "archived"]
@@ -57,6 +64,18 @@ class CampaignUpdate(BaseModel):
     prohibited_claims: TagList | None = None
     promotion_posture: PromotionPosture | None = None
     status: CampaignStatus | None = None
+
+    @model_validator(mode="after")
+    def _reject_explicit_nulls(self) -> "CampaignUpdate":
+        # Omitting a field means "leave unchanged"; sending null means
+        # neither that nor any defined value, so it fails validation
+        # instead of silently no-op'ing or crashing on NOT NULL columns.
+        nulls = sorted(
+            field for field in self.model_fields_set if getattr(self, field) is None
+        )
+        if nulls:
+            raise ValueError(f"Fields may not be null: {', '.join(nulls)}")
+        return self
 
 
 class CampaignResponse(BaseModel):
