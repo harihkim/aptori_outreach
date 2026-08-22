@@ -396,11 +396,11 @@ def test_transition_replay_returns_the_original_response_without_duplicate_audit
     assert len(transitions) == 1
 
 
-def test_patch_rejects_explicit_null_fields(client: TestClient) -> None:
+def test_patch_rejects_explicit_null_on_non_nullable_fields(client: TestClient) -> None:
     created = created_campaign(client)
     campaign_id = created["id"]
 
-    for field in ("name", "keywords", "promotion_posture", "status", "product_context"):
+    for field in ("name", "keywords", "promotion_posture", "status"):
         response = client.patch(
             f"/campaigns/{campaign_id}",
             json={field: None},
@@ -410,6 +410,22 @@ def test_patch_rejects_explicit_null_fields(client: TestClient) -> None:
 
     # Nothing slipped through to the stored campaign.
     assert client.get(f"/campaigns/{campaign_id}").json() == created
+
+
+def test_patch_clears_nullable_fields_with_explicit_null(client: TestClient) -> None:
+    created = created_campaign(client)
+    campaign_id = created["id"]
+
+    response = client.patch(
+        f"/campaigns/{campaign_id}",
+        json={"product_context": None, "icp": None},
+        headers=write_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["product_context"] is None
+    assert body["icp"] is None
 
 
 def test_transition_races_cannot_revive_an_archived_campaign(

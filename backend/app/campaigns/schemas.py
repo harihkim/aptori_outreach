@@ -36,6 +36,9 @@ def _clean_tag_list(items: list[str]) -> list[str]:
 
 TagList = Annotated[list[TagItem], Field(max_length=100), AfterValidator(_clean_tag_list)]
 
+# product_context and icp are nullable columns: an explicit null clears them.
+NULLABLE_ON_UPDATE = frozenset({"product_context", "icp"})
+
 
 class CampaignCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -66,12 +69,11 @@ class CampaignUpdate(BaseModel):
     status: CampaignStatus | None = None
 
     @model_validator(mode="after")
-    def _reject_explicit_nulls(self) -> "CampaignUpdate":
-        # Omitting a field means "leave unchanged"; sending null means
-        # neither that nor any defined value, so it fails validation
-        # instead of silently no-op'ing or crashing on NOT NULL columns.
+    def _reject_null_on_non_nullable_fields(self) -> "CampaignUpdate":
         nulls = sorted(
-            field for field in self.model_fields_set if getattr(self, field) is None
+            field
+            for field in self.model_fields_set
+            if getattr(self, field) is None and field not in NULLABLE_ON_UPDATE
         )
         if nulls:
             raise ValueError(f"Fields may not be null: {', '.join(nulls)}")
