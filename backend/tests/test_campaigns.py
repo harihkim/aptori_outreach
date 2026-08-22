@@ -278,8 +278,10 @@ def test_archived_campaign_is_read_only(client: TestClient) -> None:
     assert field_edit.json()["detail"]["code"] == "campaign_archived"
     assert reopen.status_code == 409
     assert reopen.json()["detail"]["code"] == "campaign_archived"
-    assert same_status.status_code == 200
-    assert same_status.json()["status"] == "archived"
+    # Even repeating the archived status carries write intent and is refused;
+    # read-only means no PATCH with any payload is accepted.
+    assert same_status.status_code == 409
+    assert same_status.json()["detail"]["code"] == "campaign_archived"
 
 
 def test_same_status_patch_is_an_idempotent_noop(

@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.auditing.service import record_audit
 from app.campaigns.models import Campaign
-from app.campaigns.schemas import CampaignCreate, CampaignUpdate
+from app.campaigns.schemas import CampaignCreate, CampaignStatus, CampaignUpdate
 
 # DRAFT -> ACTIVE -> PAUSED -> ACTIVE ; ACTIVE|PAUSED -> ARCHIVED
-LEGAL_TRANSITIONS = {
+LEGAL_TRANSITIONS: set[tuple[CampaignStatus, CampaignStatus]] = {
     ("draft", "active"),
     ("active", "paused"),
     ("paused", "active"),
@@ -126,11 +126,12 @@ def update_campaign(
 def _assert_mutable(
     campaign: Campaign, updates: dict[str, Any], requested_status: str | None
 ) -> None:
-    status_change = requested_status is not None and requested_status != campaign.status
-    if campaign.status == "archived" and (updates or status_change):
+    # Archived is terminal and read-only: any PATCH carrying intent — field
+    # edits or a status value, even the status it already has — is refused.
+    if campaign.status == "archived" and (updates or requested_status is not None):
         raise CampaignArchivedError(str(campaign.id))
 
 
-def _assert_transition(current: str, requested: str) -> None:
+def _assert_transition(current: str, requested: CampaignStatus) -> None:
     if (current, requested) not in LEGAL_TRANSITIONS:
         raise InvalidCampaignTransitionError(current, requested)
