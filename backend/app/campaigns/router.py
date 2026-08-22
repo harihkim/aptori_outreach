@@ -44,9 +44,13 @@ def update_campaign(
     session: SessionDep,
     workspace: WorkspaceDep,
 ) -> CampaignResponse:
-    _get_or_404(session, workspace.id, campaign_id)
     try:
         campaign = service.update_campaign(session, workspace.id, campaign_id, payload)
+    except service.CampaignNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "campaign_not_found", "message": "Campaign not found."},
+        ) from None
     except service.CampaignArchivedError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

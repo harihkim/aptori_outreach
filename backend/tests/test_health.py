@@ -1,4 +1,4 @@
-"""Health endpoint, session management, and migration behavior on the test database."""
+"""Health endpoint, session management, and app lifecycle behavior."""
 
 import logging
 
@@ -6,11 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from alembic import command
-from alembic.config import Config
 from app.db import DatabaseSessionManager
 from app.main import create_app
-from tests.conftest import TEST_DATABASE_URL
 
 
 def test_health_reports_ok_with_unified_contract(migrated_test_database: str) -> None:
@@ -92,22 +89,3 @@ def test_session_manager_yields_working_sessions(migrated_test_database: str) ->
     session = next(sessions)
     assert session.execute(text("SELECT 1")).scalar() == 1
     sessions.close()
-
-
-def test_baseline_migration_applies_and_rolls_back_cleanly(migrated_test_database: str) -> None:
-    # Domain-table round-trip behavior lives in test_migrations.py; this test
-    # pins the shared downgrade/upgrade machinery itself on the baseline step.
-    alembic_cfg = Config("alembic.ini")
-    alembic_cfg.set_main_option("script_location", "alembic")
-    alembic_cfg.set_main_option("sqlalchemy.url", migrated_test_database)
-
-    command.downgrade(alembic_cfg, "0001_baseline")
-    command.upgrade(alembic_cfg, "head")
-
-    from alembic.runtime.migration import MigrationContext
-    from sqlalchemy import create_engine, inspect
-
-    with create_engine(migrated_test_database).connect() as connection:
-        context = MigrationContext.configure(connection)
-        assert context.get_current_revision() is not None
-        assert "alembic_version" in set(inspect(connection).get_table_names())

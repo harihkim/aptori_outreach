@@ -13,16 +13,17 @@ CAMPAIGN_STATUSES = ("draft", "active", "paused", "archived")
 CAMPAIGN_POSTURES = ("expertise_first", "balanced", "high_intent_only")
 
 
+def _in_values(column: str, values: tuple[str, ...]) -> str:
+    listed = ", ".join(f"'{value}'" for value in values)
+    return f"{column} IN ({listed})"
+
+
 class Campaign(Base):
     __tablename__ = "campaigns"
     __table_args__ = (
+        CheckConstraint(_in_values("status", CAMPAIGN_STATUSES), name="status_values"),
         CheckConstraint(
-            "status IN ('draft', 'active', 'paused', 'archived')",
-            name="status_values",
-        ),
-        CheckConstraint(
-            "promotion_posture IN ('expertise_first', 'balanced', 'high_intent_only')",
-            name="posture_values",
+            _in_values("promotion_posture", CAMPAIGN_POSTURES), name="posture_values"
         ),
     )
 
