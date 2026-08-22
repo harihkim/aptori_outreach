@@ -4,6 +4,7 @@ import {
 	explainCampaignError,
 	nextActions,
 	parseCampaignsResponse,
+	parseClaimLines,
 	parseTagInput,
 	type CampaignBody
 } from '$lib/campaigns';
@@ -86,6 +87,16 @@ describe('parseCampaignsResponse', () => {
 		expect(state.detail).toBe('Unexpected response (HTTP 200)');
 	});
 
+	it('treats a non-string list item as an unexpected response', () => {
+		const state = parseCampaignsResponse({
+			httpStatus: 200,
+			body: [{ ...campaignBody, keywords: ['API security', 5] }]
+		});
+
+		expect(state.campaigns).toEqual([]);
+		expect(state.detail).toBe('Unexpected response (HTTP 200)');
+	});
+
 	it('treats a non-array body as an unexpected response', () => {
 		const state = parseCampaignsResponse({ httpStatus: 200, body: { no: 'list' } });
 
@@ -158,5 +169,18 @@ describe('explainCampaignError', () => {
 	it('falls back to a generic message for unknown failures', () => {
 		expect(explainCampaignError(422, { detail: [] })).toBe('Some fields were invalid.');
 		expect(explainCampaignError(500, null)).toBe('Unexpected error (HTTP 500).');
+	});
+});
+
+describe('parseClaimLines', () => {
+	it('splits claim input on lines and keeps commas inside a claim', () => {
+		expect(parseClaimLines('SOC 2, Type II certified\nAptori runs in CI \n')).toEqual([
+			'SOC 2, Type II certified',
+			'Aptori runs in CI'
+		]);
+	});
+
+	it('returns an empty list for blank input', () => {
+		expect(parseClaimLines('  ')).toEqual([]);
 	});
 });

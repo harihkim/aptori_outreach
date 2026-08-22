@@ -36,13 +36,13 @@ describe('campaigns/+page.svelte', () => {
 				apiReachable: true,
 				detail: null,
 				campaigns: [
-					campaign({ id: 'a', name: 'Draft listening post', status: 'draft' }),
+					campaign({ id: 'a', name: 'Draft research objective', status: 'draft' }),
 					campaign({ id: 'b', name: 'Running post', status: 'active' })
 				]
 			}
 		});
 
-		expect(screen.getByText('Draft listening post')).toBeInTheDocument();
+		expect(screen.getByText('Draft research objective')).toBeInTheDocument();
 		expect(screen.getByText('Running post')).toBeInTheDocument();
 		expect(screen.getByText('draft')).toBeInTheDocument();
 		expect(screen.getByText('active')).toBeInTheDocument();
@@ -111,6 +111,27 @@ describe('campaigns/+page.svelte', () => {
 		});
 
 		expect(screen.getByText('That lifecycle change is not allowed.')).toBeInTheDocument();
+	});
+
+	it('surfaces a reachable backend failure instead of an empty workspace', () => {
+		render(Page, {
+			data: {
+				apiReachable: true,
+				detail: 'Unexpected response (HTTP 500)',
+				campaigns: []
+			}
+		});
+
+		expect(screen.getByText('Unexpected response (HTTP 500)')).toBeInTheDocument();
+		expect(screen.queryByText('No campaigns yet.')).not.toBeInTheDocument();
+	});
+
+	it('collects claims one per line', () => {
+		render(Page, { data: { apiReachable: true, detail: null, campaigns: [] } });
+
+		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
+		expect(within(createForm).getByLabelText('Approved claims').tagName).toBe('TEXTAREA');
+		expect(within(createForm).getByLabelText('Prohibited claims').tagName).toBe('TEXTAREA');
 	});
 
 	it('explains when the backend is unreachable', () => {

@@ -76,15 +76,15 @@
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('approved_claims', suffix)} class="text-sm font-medium">Approved claims</label>
-		<input id={fieldId('approved_claims', suffix)} name="approved_claims" class="input"
-			placeholder="Statements the product may make about itself"
-			value={campaign?.approvedClaims.join(', ') ?? ''} />
+		<textarea id={fieldId('approved_claims', suffix)} name="approved_claims" rows="2"
+			class="input" placeholder="One claim per line - claims may contain commas"
+			value={campaign?.approvedClaims.join('\n') ?? ''}></textarea>
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('prohibited_claims', suffix)} class="text-sm font-medium">Prohibited claims</label>
-		<input id={fieldId('prohibited_claims', suffix)} name="prohibited_claims" class="input"
-			placeholder="Claims that must never appear in drafts"
-			value={campaign?.prohibitedClaims.join(', ') ?? ''} />
+		<textarea id={fieldId('prohibited_claims', suffix)} name="prohibited_claims" rows="2"
+			class="input" placeholder="One claim per line - claims may contain commas"
+			value={campaign?.prohibitedClaims.join('\n') ?? ''}></textarea>
 	</div>
 	<div class="grid gap-1.5">
 		<label for={fieldId('promotion_posture', suffix)} class="text-sm font-medium">Promotion posture</label>
@@ -106,8 +106,8 @@
 		</p>
 	</header>
 
-	{#if !data.apiReachable}
-		<p class="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+	{#if data.detail}
+		<p class="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
 			{data.detail}
 		</p>
 	{/if}
@@ -184,7 +184,9 @@
 				</Card.Content>
 			</Card.Root>
 		{:else}
-			<p class="text-sm text-muted-foreground">No campaigns yet.</p>
+			{#if data.detail === null}
+				<p class="text-sm text-muted-foreground">No campaigns yet.</p>
+			{/if}
 		{/each}
 	</section>
 </div>

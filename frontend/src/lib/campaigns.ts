@@ -59,6 +59,10 @@ function stringList(value: string[] | undefined): string[] {
 	return Array.isArray(value) ? value : [];
 }
 
+function isStringList(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
 /** The wire shape after validation: status and posture are known-good. */
 type ValidatedCampaignBody = Omit<CampaignBody, 'status' | 'promotion_posture'> & {
 	status: CampaignStatus;
@@ -123,6 +127,7 @@ function isCampaignBody(value: unknown): value is ValidatedCampaignBody {
 		return false;
 	}
 	const entry = value as Record<string, unknown>;
+	const listFields = ['keywords', 'subreddits', 'competitors', 'approved_claims', 'prohibited_claims'];
 	return (
 		typeof entry.id === 'string' &&
 		typeof entry.name === 'string' &&
@@ -133,7 +138,8 @@ function isCampaignBody(value: unknown): value is ValidatedCampaignBody {
 		typeof entry.created_at === 'string' &&
 		(entry.archived_at === null || typeof entry.archived_at === 'string') &&
 		(entry.product_context === null || typeof entry.product_context === 'string') &&
-		(entry.icp === null || typeof entry.icp === 'string')
+		(entry.icp === null || typeof entry.icp === 'string') &&
+		listFields.every((field) => entry[field] === undefined || isStringList(entry[field]))
 	);
 }
 
@@ -161,6 +167,17 @@ export function nextActions(status: CampaignStatus): LifecycleAction[] {
 export function parseTagInput(value: string): string[] {
 	return value
 		.split(',')
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+}
+
+/**
+ * Split claim input one claim per line. Claims routinely contain commas
+ * ("SOC 2, Type II certified"), so they must never split on commas.
+ */
+export function parseClaimLines(value: string): string[] {
+	return value
+		.split(/\r?\n/)
 		.map((item) => item.trim())
 		.filter((item) => item.length > 0);
 }

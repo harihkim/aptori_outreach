@@ -2,7 +2,12 @@ import { env } from '$env/dynamic/public';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
-import { explainCampaignError, parseCampaignsResponse, parseTagInput } from '$lib/campaigns';
+import {
+	explainCampaignError,
+	parseCampaignsResponse,
+	parseClaimLines,
+	parseTagInput
+} from '$lib/campaigns';
 
 const apiBaseUrl = env.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -43,6 +48,10 @@ function tagList(form: FormData, field: string): string[] {
 	return parseTagInput(String(form.get(field) ?? ''));
 }
 
+function claimList(form: FormData, field: string): string[] {
+	return parseClaimLines(String(form.get(field) ?? ''));
+}
+
 /** The full editable Campaign contract, identical for create and update. */
 function campaignPayload(form: FormData): Record<string, string | string[] | null> {
 	return {
@@ -52,8 +61,8 @@ function campaignPayload(form: FormData): Record<string, string | string[] | nul
 		keywords: tagList(form, 'keywords'),
 		subreddits: tagList(form, 'subreddits'),
 		competitors: tagList(form, 'competitors'),
-		approved_claims: tagList(form, 'approved_claims'),
-		prohibited_claims: tagList(form, 'prohibited_claims'),
+		approved_claims: claimList(form, 'approved_claims'),
+		prohibited_claims: claimList(form, 'prohibited_claims'),
 		promotion_posture: requiredText(form, 'promotion_posture')
 	};
 }
