@@ -15,7 +15,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "httpx>=0.27",
+    # httpx2 is Starlette TestClient's HTTP transport — the drop-in successor to
+    # httpx — used implicitly by every test that builds TestClient(...). Dev-only;
+    # nothing in app/ imports it. Future outbound HTTP in product code would also
+    # use httpx2.
     "httpx2",
     "mypy",
     "ty",

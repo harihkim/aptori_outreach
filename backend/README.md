@@ -33,6 +33,8 @@ The suite migrates a dedicated test database (`aptori_outreach_test`, override w
 ~/.local/bin/uv run pytest
 ```
 
+`TestClient` drives the app in-process over [httpx2](https://pypi.org/project/httpx2/), Starlette's current TestClient transport and a dev-only dependency; nothing in `app/` imports it.
+
 ## Static checks
 
 Three type checkers guard the codebase; all must pass before merge:
