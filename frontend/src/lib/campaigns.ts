@@ -1,0 +1,179 @@
+export type CampaignStatus = 'draft' | 'active' | 'paused' | 'archived';
+export type PromotionPosture = 'expertise_first' | 'balanced' | 'high_intent_only';
+
+export type CampaignBody = {
+	id: string;
+	workspace_id: string;
+	name: string;
+	product_context: string | null;
+	icp: string | null;
+	keywords?: string[];
+	subreddits?: string[];
+	competitors?: string[];
+	approved_claims?: string[];
+	prohibited_claims?: string[];
+	promotion_posture: string;
+	status: string;
+	created_at: string;
+	updated_at: string;
+	archived_at: string | null;
+};
+
+export type Campaign = {
+	id: string;
+	name: string;
+	status: CampaignStatus;
+	promotionPosture: PromotionPosture;
+	productContext: string | null;
+	icp: string | null;
+	keywords: string[];
+	subreddits: string[];
+	competitors: string[];
+	createdAt: string;
+	archivedAt: string | null;
+};
+
+export type CampaignsState = {
+	/** The backend answered our request, whatever it said. */
+	apiReachable: boolean;
+	campaigns: Campaign[];
+	detail: string | null;
+};
+
+export type LifecycleAction = { status: CampaignStatus; label: string };
+
+const STATUSES: CampaignStatus[] = ['draft', 'active', 'paused', 'archived'];
+const POSTURES: PromotionPosture[] = ['expertise_first', 'balanced', 'high_intent_only'];
+
+function isCampaignStatus(value: string): value is CampaignStatus {
+	return (STATUSES as string[]).includes(value);
+}
+
+function isPromotionPosture(value: string): value is PromotionPosture {
+	return (POSTURES as string[]).includes(value);
+}
+
+function stringList(value: string[] | undefined): string[] {
+	return Array.isArray(value) ? value : [];
+}
+
+/** The wire shape after validation: status and posture are known-good. */
+type ValidatedCampaignBody = Omit<CampaignBody, 'status' | 'promotion_posture'> & {
+	status: CampaignStatus;
+	promotion_posture: PromotionPosture;
+};
+
+/**
+ * Derive the Campaigns list state from one backend response.
+ *
+ * `httpStatus` is null when the request never completed (network error or
+ * timeout); `body` is unknown because the backend may answer with anything.
+ * The listing is trusted only when every entry carries the complete contract.
+ */
+export function parseCampaignsResponse({
+	httpStatus,
+	body
+}: {
+	httpStatus: number | null;
+	body: unknown;
+}): CampaignsState {
+	if (httpStatus === null) {
+		return { apiReachable: false, campaigns: [], detail: 'Backend did not answer' };
+	}
+
+	const unexpected: CampaignsState = {
+		apiReachable: true,
+		campaigns: [],
+		detail: `Unexpected response (HTTP ${httpStatus})`
+	};
+
+	if (httpStatus !== 200 || !Array.isArray(body)) {
+		return unexpected;
+	}
+
+	const campaigns: Campaign[] = [];
+	for (const entry of body) {
+		if (!isCampaignBody(entry)) {
+			return unexpected;
+		}
+		campaigns.push({
+			id: entry.id,
+			name: entry.name,
+			status: entry.status,
+			promotionPosture: entry.promotion_posture,
+			productContext: entry.product_context,
+			icp: entry.icp,
+			keywords: stringList(entry.keywords),
+			subreddits: stringList(entry.subreddits),
+			competitors: stringList(entry.competitors),
+			createdAt: entry.created_at,
+			archivedAt: entry.archived_at
+		});
+	}
+
+	return { apiReachable: true, campaigns, detail: null };
+}
+
+function isCampaignBody(value: unknown): value is ValidatedCampaignBody {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	const entry = value as Record<string, unknown>;
+	return (
+		typeof entry.id === 'string' &&
+		typeof entry.name === 'string' &&
+		typeof entry.status === 'string' &&
+		isCampaignStatus(entry.status) &&
+		typeof entry.promotion_posture === 'string' &&
+		isPromotionPosture(entry.promotion_posture) &&
+		typeof entry.created_at === 'string' &&
+		(entry.archived_at === null || typeof entry.archived_at === 'string') &&
+		(entry.product_context === null || typeof entry.product_context === 'string') &&
+		(entry.icp === null || typeof entry.icp === 'string')
+	);
+}
+
+/** The legal lifecycle transitions per current status; archived is terminal. */
+export function nextActions(status: CampaignStatus): LifecycleAction[] {
+	switch (status) {
+		case 'draft':
+			return [{ status: 'active', label: 'Activate' }];
+		case 'active':
+			return [
+				{ status: 'paused', label: 'Pause' },
+				{ status: 'archived', label: 'Archive' }
+			];
+		case 'paused':
+			return [
+				{ status: 'active', label: 'Resume' },
+				{ status: 'archived', label: 'Archive' }
+			];
+		case 'archived':
+			return [];
+	}
+}
+
+/** Split comma-separated operator input into clean tag lists for the API. */
+export function parseTagInput(value: string): string[] {
+	return value
+		.split(',')
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+}
+
+/** Translate a backend failure into guidance the operator can act on. */
+export function explainCampaignError(httpStatus: number, body: unknown): string {
+	const code = (body as { detail?: { code?: string } } | null)?.detail?.code;
+	switch (code) {
+		case 'campaign_invalid_transition':
+			return 'That lifecycle change is not allowed.';
+		case 'campaign_archived':
+			return 'Archived campaigns are read-only.';
+		case 'campaign_not_found':
+			return 'Campaign not found.';
+	}
+	if (httpStatus === 422) {
+		return 'Some fields were invalid.';
+	}
+	return `Unexpected error (HTTP ${httpStatus}).`;
+}
