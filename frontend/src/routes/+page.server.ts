@@ -33,9 +33,20 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 	}
 
 	const apiReachable = httpStatus !== null;
-	const database =
-		body?.database === 'ok' || body?.database === 'unavailable' ? body.database : 'unknown';
-	const degraded = !apiReachable || database !== 'ok';
+	// Operational requires the complete healthy contract — HTTP 200 with
+	// status "ok", api "reachable", and database "ok". Anything else is
+	// degraded, even if individual fields claim otherwise.
+	const healthy =
+		httpStatus === 200 &&
+		body?.status === 'ok' &&
+		body?.api === 'reachable' &&
+		body?.database === 'ok';
+	const database = healthy
+		? 'ok'
+		: apiReachable && body?.database === 'unavailable'
+			? 'unavailable'
+			: 'unknown';
+	const degraded = !healthy;
 
 	const state: HealthState = {
 		apiReachable,
