@@ -25,6 +25,8 @@ createdb aptori_outreach            # or: APTORI_DATABASE_URL=... in backend/.en
 
 `GET /health` returns `{"status": "ok", "database": "ok"}` and degrades to HTTP 503 when the database is unreachable.
 
+The first domain slice is live: `POST /campaigns` creates a draft Campaign in the seeded default Workspace, `GET /campaigns` lists them newest first, and `GET/PATCH /campaigns/{id}` reads, edits, and walks the lifecycle (`DRAFT → ACTIVE → PAUSED → ACTIVE; ACTIVE|PAUSED → ARCHIVED`) with stable conflict codes and an append-only audit trail.
+
 ## Tests
 
 The suite migrates a dedicated test database (`aptori_outreach_test`, override with `APTORI_TEST_DATABASE_URL`) and creates it when missing:

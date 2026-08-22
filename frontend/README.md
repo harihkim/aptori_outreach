@@ -1,6 +1,6 @@
 # aptori frontend
 
-SvelteKit 2 + Svelte 5 application shell for the social intelligence and engagement copilot, styled with Tailwind 4 and shadcn-svelte components. V2 delivers the shell wired to backend health; Campaign screens land in V3.
+SvelteKit 2 + Svelte 5 application for the social intelligence and engagement copilot, styled with Tailwind 4 and shadcn-svelte components. The shell reports backend health at `/`; `/campaigns` manages Campaigns (create, edit, lifecycle) over the backend REST API.
 
 ## Requirements
 
@@ -41,3 +41,5 @@ pnpm preview      # preview the production build
 ## Backend contract
 
 `+page.server.ts` fetches `GET {PUBLIC_API_BASE_URL}/health` with a 3-second timeout and classifies it as `apiReachable`, `database` (`ok` | `unavailable` | `unknown`), and `degraded`. The page reports `operational` only for the complete healthy contract — HTTP 200 with `status: "ok"`, `api: "reachable"`, and `database: "ok"`; anything else is shown as degraded.
+
+`/campaigns` follows the same pattern: the load fetches `GET /campaigns` through the pure contract parser in `src/lib/campaigns.ts`, and SvelteKit form actions (`?/create`, `?/update`, `?/transition`) proxy `POST`/`PATCH /campaigns*` server-side, translating the backend's stable error codes into operator guidance.

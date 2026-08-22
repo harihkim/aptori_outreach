@@ -9,7 +9,7 @@ This is the semantic application-facing contract. FastAPI/Pydantic models will b
 
 | Area | Representative endpoints |
 |---|---|
-| Campaigns | `POST /campaigns`; `GET/PATCH /campaigns/{id}`; `POST /campaigns/{id}/discovery-runs` |
+| Campaigns | `GET /campaigns`; `POST /campaigns`; `GET/PATCH /campaigns/{id}`; `POST /campaigns/{id}/discovery-runs` |
 | Opportunities | `GET /opportunities`; `GET /opportunities/{id}`; `POST /opportunities/{id}/dismiss`; `POST /opportunities/{id}/save` |
 | Analysis | `POST /conversations/{id}/analyses`; later `POST /campaigns/{id}/theme-clusters` |
 | Drafts | `POST /opportunities/{opportunity_id}/drafts`; `GET /drafts/{id}`; `POST /drafts/{id}/versions`; `POST /drafts/{id}/regenerate` |
