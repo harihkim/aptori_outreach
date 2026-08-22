@@ -1,4 +1,5 @@
-import { env } from '$env/dynamic/public';
+import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -9,15 +10,29 @@ import {
 	parseTagInput
 } from '$lib/campaigns';
 
-const apiBaseUrl = env.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
 type ApiResult = { ok: boolean; status: number; body: unknown };
 
-async function callApi(method: string, path: string, payload: unknown): Promise<ApiResult> {
+async function callApi(
+	method: string,
+	path: string,
+	payload: unknown,
+	{ write = false }: { write?: boolean } = {}
+): Promise<ApiResult> {
+	const headers: Record<string, string> = { 'content-type': 'application/json' };
+	if (write) {
+		// Writes require the deployment bearer token and a fresh idempotency
+		// key; each form submission is a distinct request.
+		if (env.API_TOKEN) {
+			headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
+		}
+		headers['Idempotency-Key'] = crypto.randomUUID();
+	}
 	try {
 		const response = await fetch(`${apiBaseUrl}${path}`, {
 			method,
-			headers: { 'content-type': 'application/json' },
+			headers,
 			body: JSON.stringify(payload),
 			signal: AbortSignal.timeout(5000)
 		});
@@ -88,7 +103,7 @@ export const load: PageServerLoad = async ({ fetch, depends }) => {
 export const actions: Actions = {
 	create: async ({ request }) => {
 		const form = await request.formData();
-		const result = await callApi('POST', '/campaigns', campaignPayload(form));
+		const result = await callApi('POST', '/campaigns', campaignPayload(form), { write: true });
 		if (!result.ok) {
 			return fail(400, { message: explain(result) });
 		}
@@ -100,7 +115,8 @@ export const actions: Actions = {
 		const result = await callApi(
 			'PATCH',
 			`/campaigns/${requiredText(form, 'campaign_id')}`,
-			campaignPayload(form)
+			campaignPayload(form),
+			{ write: true }
 		);
 		if (!result.ok) {
 			return fail(400, { message: explain(result) });
@@ -113,7 +129,8 @@ export const actions: Actions = {
 		const result = await callApi(
 			'PATCH',
 			`/campaigns/${requiredText(form, 'campaign_id')}`,
-			{ status: requiredText(form, 'status') }
+			{ status: requiredText(form, 'status') },
+			{ write: true }
 		);
 		if (!result.ok) {
 			return fail(400, { message: explain(result) });
