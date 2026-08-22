@@ -13,28 +13,25 @@ Workspace for a Reddit-first **Social Intelligence & Engagement Copilot**: disco
 | `retrieval-eval/prototype-smoke/` | Frozen smoke-gate protocol, known-thread corpus (14 verified fixtures), provider configs, daily canary runner. |
 | `experiments/` | Retrieval spikes, including the in-origin thread extractor and its recorded evidence runs. |
 | `backend/` | FastAPI application core over PostgreSQL canonical state with Alembic migrations (V1 done; Campaign domain lands in V3). |
-| `frontend/` | SvelteKit 5 + shadcn-svelte shell showing live backend connectivity (V2 done; Campaign screens land in V3). |
+| `frontend/` | SvelteKit 2 + Svelte 5 with shadcn-svelte, showing live backend connectivity (V2 done; Campaign screens land in V3). |
 
 ## Quick start (WSL)
 
 ```bash
 # Backend: FastAPI + PostgreSQL (needs local Postgres; see backend/README.md)
-cd backend && ~/.local/bin/uv sync && ~/.local/bin/uv run alembic upgrade head
-~/.local/bin/uv run pytest            # tests
-~/.local/bin/uv run uvicorn app.main:app   # GET /health
+(cd backend && ~/.local/bin/uv sync && ~/.local/bin/uv run alembic upgrade head)
+(cd backend && ~/.local/bin/uv run pytest)                 # tests
+(cd backend && ~/.local/bin/uv run uvicorn app.main:app)   # GET /health
 
 # Frontend: pnpm on Node >=20.19 (22.x recommended; see frontend/README.md)
-cd frontend && pnpm install && pnpm dev    # http://localhost:5173
+(cd frontend && pnpm install && pnpm dev)                  # http://localhost:5173
 
-# Offline adapter and normalizer tests
-cd packages/obscura-retrieval
-PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm ci && npm test
+# Retrieval adapters: offline tests and the frozen smoke gate (clean worktree required)
+(cd packages/obscura-retrieval && PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm ci && npm test)
+(cd packages/obscura-retrieval && PATH=/home/hari/.local/node-v20.18.0-linux-x64/bin:$PATH npm run smoke)
 
-# Frozen prototype smoke gate (requires clean worktree; ~5 minutes, hits Reddit anonymously via Obscura)
-npm run smoke
-
-# Daily canary (cron)
-../retrieval-eval/prototype-smoke/daily-smoke.sh
+# Daily canary (install once via crontab; see retrieval-eval/prototype-smoke/README.md)
+retrieval-eval/prototype-smoke/daily-smoke.sh
 ```
 
 The Obscura binary is pinned at `/home/hari/.local/bin/obscura` (SHA-256 verified against the committed provider configs).
