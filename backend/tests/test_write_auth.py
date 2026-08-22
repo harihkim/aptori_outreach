@@ -1,4 +1,4 @@
-"""Write authentication at the FastAPI app boundary."""
+"""Campaign authentication and OpenAPI behavior at the FastAPI boundary."""
 
 import uuid
 from collections.abc import Iterator
@@ -29,6 +29,7 @@ def clean_campaign_rows(migrated_test_database: str) -> Iterator[None]:
     yield
     with create_engine(migrated_test_database).begin() as connection:
         connection.execute(text("DELETE FROM audit_events"))
+        connection.execute(text("DELETE FROM idempotency_events"))
         connection.execute(text("DELETE FROM campaigns"))
 
 
@@ -75,10 +76,6 @@ def test_writes_accept_the_configured_bearer_token(migrated_test_database: str) 
 
     assert response.status_code == 201
     assert response.json()["status"] == "draft"
-
-
-
-
 def test_an_empty_configured_token_is_treated_as_unconfigured(
     migrated_test_database: str,
 ) -> None:
@@ -127,5 +124,19 @@ def test_openapi_documents_campaign_contracts(migrated_test_database: str) -> No
     assert "$ref" in post["responses"]["201"]["content"]["application/json"]["schema"]
     patch = spec["paths"]["/campaigns/{campaign_id}"]["patch"]
     assert "$ref" in patch["responses"]["200"]["content"]["application/json"]["schema"]
-    assert "Idempotency-Key" in post["responses"]["201"]["headers"]
+    assert spec["components"]["securitySchemes"]["HTTPBearer"] == {
+        "type": "http",
+        "scheme": "bearer",
+    }
+    assert post["security"] == [{"HTTPBearer": []}]
+    assert patch["security"] == [{"HTTPBearer": []}]
+    assert any(
+        parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+        for parameter in post["parameters"]
+    )
+    assert "headers" not in post["responses"]["201"]
+    list_responses = spec["paths"]["/campaigns"]["get"]["responses"]
+    assert "400" not in list_responses
+    assert "409" not in list_responses
+    assert "security" not in spec["paths"]["/health"]["get"]
     assert spec["components"]["schemas"]["ErrorResponse"]

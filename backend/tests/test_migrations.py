@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0003_idempotency_events"
+HEAD_REVISION = "0004_reconcile_idempotency"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -48,3 +48,48 @@ def test_migration_seeds_the_default_workspace(migrated_test_database: str) -> N
         seeded = connection.execute(text("SELECT id FROM workspaces")).fetchall()
 
     assert [row[0] for row in seeded] == [DEFAULT_WORKSPACE_ID]
+
+
+def test_migration_reconciles_legacy_pending_idempotency_rows(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.downgrade(alembic_cfg, "0003_idempotency_events")
+
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(
+            text("DELETE FROM idempotency_events WHERE key = 'legacy-pending'")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO idempotency_events "
+                "(id, key, workspace_id, request_fingerprint) "
+                "VALUES (:id, :key, :workspace, :fingerprint)"
+            ),
+            {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "key": "legacy-pending",
+                "workspace": str(DEFAULT_WORKSPACE_ID),
+                "fingerprint": "a" * 64,
+            },
+        )
+
+    command.upgrade(alembic_cfg, "head")
+
+    with create_engine(migrated_test_database).connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT status_code, response_body FROM idempotency_events "
+                "WHERE key = 'legacy-pending'"
+            )
+        ).one()
+
+    assert row.status_code == 409
+    assert row.response_body["detail"]["code"] == (
+        "idempotency_key_reconciliation_required"
+    )
+
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(
+            text("DELETE FROM idempotency_events WHERE key = 'legacy-pending'")
+        )

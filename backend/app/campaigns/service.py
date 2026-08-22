@@ -5,9 +5,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import Principal
 from app.auditing.service import record_audit
 from app.campaigns.models import Campaign
-from app.campaigns.schemas import CampaignCreate, CampaignStatus, CampaignUpdate
+from app.campaigns.schemas import (
+    CampaignCreate,
+    CampaignResponse,
+    CampaignStatus,
+    CampaignUpdate,
+)
+from app.idempotency import service as idempotency
 
 # DRAFT -> ACTIVE -> PAUSED -> ACTIVE ; ACTIVE|PAUSED -> ARCHIVED
 LEGAL_TRANSITIONS: set[tuple[CampaignStatus, CampaignStatus]] = {
@@ -17,6 +24,7 @@ LEGAL_TRANSITIONS: set[tuple[CampaignStatus, CampaignStatus]] = {
     ("active", "archived"),
     ("paused", "archived"),
 }
+
 
 class CampaignNotFound(LookupError):
     """No campaign with that id exists in the caller's workspace."""
@@ -33,10 +41,38 @@ class InvalidCampaignTransitionError(ValueError):
         super().__init__(f"{current} -> {requested} is not a legal campaign transition")
 
 
+class WorkspaceAccessDenied(PermissionError):
+    """The authenticated principal cannot operate on this workspace."""
+
+
 def create_campaign(
+    session: Session,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    key: str,
+    payload: CampaignCreate,
+) -> idempotency.Replay:
+    """Create a Campaign through the authorized, idempotent transaction seam."""
+    _require_workspace_access(principal, workspace_id)
+
+    def operation() -> idempotency.Replay:
+        campaign = _stage_create_campaign(session, workspace_id, principal.actor, payload)
+        return _campaign_result(session, campaign, status_code=201)
+
+    return idempotency.execute(
+        session,
+        workspace_id=workspace_id,
+        key=key,
+        method="POST",
+        path="/campaigns",
+        payload=payload.model_dump(mode="json"),
+        operation=operation,
+    )
+
+
+def _stage_create_campaign(
     session: Session, workspace_id: uuid.UUID, actor: str, payload: CampaignCreate
 ) -> Campaign:
-    """Stage the creation and its audit row; the caller owns the commit."""
     campaign = Campaign(workspace_id=workspace_id, **payload.model_dump())
     session.add(campaign)
     session.flush()
@@ -52,8 +88,12 @@ def create_campaign(
 
 
 def get_campaign(
-    session: Session, workspace_id: uuid.UUID, campaign_id: uuid.UUID
+    session: Session,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
 ) -> Campaign:
+    _require_workspace_access(principal, workspace_id)
     campaign = session.scalar(
         select(Campaign).where(
             Campaign.id == campaign_id, Campaign.workspace_id == workspace_id
@@ -64,7 +104,10 @@ def get_campaign(
     return campaign
 
 
-def list_campaigns(session: Session, workspace_id: uuid.UUID) -> list[Campaign]:
+def list_campaigns(
+    session: Session, principal: Principal, workspace_id: uuid.UUID
+) -> list[Campaign]:
+    _require_workspace_access(principal, workspace_id)
     campaigns = session.scalars(
         select(Campaign)
         .where(Campaign.workspace_id == workspace_id)
@@ -73,7 +116,7 @@ def list_campaigns(session: Session, workspace_id: uuid.UUID) -> list[Campaign]:
     return list(campaigns)
 
 
-def get_campaign_locked(
+def _get_campaign_locked(
     session: Session, workspace_id: uuid.UUID, campaign_id: uuid.UUID
 ) -> Campaign:
     """Fetch the campaign holding its row lock.
@@ -94,12 +137,57 @@ def get_campaign_locked(
 
 def update_campaign(
     session: Session,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    key: str,
+    payload: CampaignUpdate,
+) -> idempotency.Replay:
+    """Update a Campaign through the authorized, idempotent transaction seam."""
+    _require_workspace_access(principal, workspace_id)
+
+    def operation() -> idempotency.Replay:
+        try:
+            campaign = _stage_update_campaign(
+                session,
+                workspace_id,
+                campaign_id,
+                principal.actor,
+                payload,
+            )
+        except CampaignNotFound:
+            return _error_result(404, "campaign_not_found", "Campaign not found.")
+        except CampaignArchivedError:
+            return _error_result(
+                409, "campaign_archived", "Archived campaigns are read-only."
+            )
+        except InvalidCampaignTransitionError as error:
+            return _error_result(
+                409,
+                "campaign_invalid_transition",
+                f"{error.current} -> {error.requested} is not a legal campaign transition.",
+            )
+        return _campaign_result(session, campaign, status_code=200)
+
+    return idempotency.execute(
+        session,
+        workspace_id=workspace_id,
+        key=key,
+        method="PATCH",
+        path=f"/campaigns/{campaign_id}",
+        payload=payload.model_dump(mode="json", exclude_unset=True),
+        operation=operation,
+    )
+
+
+def _stage_update_campaign(
+    session: Session,
     workspace_id: uuid.UUID,
     campaign_id: uuid.UUID,
     actor: str,
     payload: CampaignUpdate,
 ) -> Campaign:
-    campaign = get_campaign_locked(session, workspace_id, campaign_id)
+    campaign = _get_campaign_locked(session, workspace_id, campaign_id)
     updates: dict[str, Any] = payload.model_dump(exclude_unset=True)
     requested_status = updates.pop("status", None)
 
@@ -135,6 +223,29 @@ def update_campaign(
         )
 
     return campaign
+
+
+def _campaign_result(
+    session: Session, campaign: Campaign, *, status_code: int
+) -> idempotency.Replay:
+    session.flush()
+    session.refresh(campaign)
+    body = CampaignResponse.model_validate(campaign).model_dump(mode="json")
+    return idempotency.Replay(status_code=status_code, body=body)
+
+
+def _error_result(status_code: int, code: str, message: str) -> idempotency.Replay:
+    return idempotency.Replay(
+        status_code=status_code,
+        body={"detail": {"code": code, "message": message}},
+    )
+
+
+def _require_workspace_access(
+    principal: Principal, workspace_id: uuid.UUID
+) -> None:
+    if not principal.can_access(workspace_id):
+        raise WorkspaceAccessDenied(str(workspace_id))
 
 
 def _assert_mutable(

@@ -15,7 +15,17 @@ from app.schemas import HealthResponse
 DATABASE_UNAVAILABLE_DETAIL = "database unavailable"
 
 
-def create_app(database_url: str | None = None, api_token: str | None = None) -> FastAPI:
+class _UnsetApiToken:
+    """Sentinel that distinguishes omitted configuration from explicit None."""
+
+
+_UNSET_API_TOKEN = _UnsetApiToken()
+
+
+def create_app(
+    database_url: str | None = None,
+    api_token: str | None | _UnsetApiToken = _UNSET_API_TOKEN,
+) -> FastAPI:
     settings = get_settings()
     manager = DatabaseSessionManager(database_url or settings.database_url)
 
@@ -26,7 +36,9 @@ def create_app(database_url: str | None = None, api_token: str | None = None) ->
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.state.database = manager
-    app.state.api_token = api_token if api_token is not None else settings.api_token
+    app.state.api_token = (
+        settings.api_token if isinstance(api_token, _UnsetApiToken) else api_token
+    )
     app.include_router(campaigns_router)
 
     @app.get(

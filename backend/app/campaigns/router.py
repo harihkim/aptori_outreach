@@ -1,9 +1,9 @@
-import hashlib
-import json
-from typing import Annotated, Any
+from collections.abc import Callable
+from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Header, HTTPException, Path, status
+from fastapi.responses import JSONResponse
 
 from app.campaigns import service
 from app.campaigns.schemas import (
@@ -12,79 +12,85 @@ from app.campaigns.schemas import (
     CampaignUpdate,
     ErrorResponse,
 )
-from app.deps import PrincipalDep, SessionDep, WorkspaceDep, require_principal
+from app.deps import PrincipalDep, SessionDep, WorkspaceDep
 from app.idempotency import service as idempotency
 
-router = APIRouter(
-    prefix="/campaigns", tags=["campaigns"], dependencies=[Depends(require_principal)]
-)
+router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
-_IDEMPOTENCY_HEADER = {
-    "description": "Unique key for this write; replays return the original result."
-}
-
-_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    400: {"model": ErrorResponse, "description": "Malformed write request."},
+_AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
-    404: {"model": ErrorResponse, "description": "Campaign not found."},
-    409: {"model": ErrorResponse, "description": "Conflicting state or key."},
+    403: {"model": ErrorResponse, "description": "Workspace access denied."},
     503: {"model": ErrorResponse, "description": "API token or workspace unconfigured."},
 }
+_WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **_AUTH_RESPONSES,
+    400: {"model": ErrorResponse, "description": "Invalid idempotency key."},
+    409: {"model": ErrorResponse, "description": "Conflicting state or key."},
+}
+_IDEMPOTENCY_DESCRIPTION = (
+    "Unique key for this logical write; retries return its original result."
+)
+
+T = TypeVar("T")
 
 
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
-    responses={
-        **_ERROR_RESPONSES,
-        201: {
-            "model": CampaignResponse,
-            "description": "Created Campaign.",
-            "headers": {"Idempotency-Key": _IDEMPOTENCY_HEADER},
-        },
-    },
+    response_model=CampaignResponse,
+    responses=_WRITE_RESPONSES,
 )
 def create_campaign(
     payload: CampaignCreate,
     session: SessionDep,
     workspace: WorkspaceDep,
-    actor: PrincipalDep,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> CampaignResponse:
+    principal: PrincipalDep,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", description=_IDEMPOTENCY_DESCRIPTION),
+    ] = None,
+) -> CampaignResponse | JSONResponse:
     key = _required_key(idempotency_key)
-    fingerprint = _fingerprint("POST", "/campaigns", payload.model_dump(mode="json"))
-    replay = _claim(session, workspace.id, key, fingerprint)
-    if replay is not None:
-        return _replayed(replay)
-    campaign = service.create_campaign(session, workspace.id, actor, payload)
-    # Load server-generated values (created_at/updated_at) so the recorded
-    # replay body is byte-identical to the live response.
-    session.flush()
-    session.refresh(campaign)
-    body = _campaign_body(campaign)
-    idempotency.attach(
-        session, workspace_id=workspace.id, key=key, status_code=201, body=body
+    return _write_response(
+        lambda: service.create_campaign(
+            session,
+            principal,
+            workspace.id,
+            key,
+            payload,
+        )
     )
-    session.commit()
-    return CampaignResponse.model_validate(campaign)
 
 
-@router.get("", responses=_ERROR_RESPONSES)
+@router.get("", responses=_AUTH_RESPONSES)
 def list_campaigns(
-    session: SessionDep, workspace: WorkspaceDep
+    session: SessionDep, workspace: WorkspaceDep, principal: PrincipalDep
 ) -> list[CampaignResponse]:
-    return [
-        CampaignResponse.model_validate(campaign)
-        for campaign in service.list_campaigns(session, workspace.id)
-    ]
+    campaigns = _authorized(
+        lambda: service.list_campaigns(session, principal, workspace.id)
+    )
+    return [CampaignResponse.model_validate(campaign) for campaign in campaigns]
 
 
-@router.get("/{campaign_id}", responses=_ERROR_RESPONSES)
+@router.get(
+    "/{campaign_id}",
+    responses={
+        **_AUTH_RESPONSES,
+        404: {"model": ErrorResponse, "description": "Campaign not found."},
+    },
+)
 def get_campaign(
-    campaign_id: Annotated[UUID, Path()], session: SessionDep, workspace: WorkspaceDep
+    campaign_id: Annotated[UUID, Path()],
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    principal: PrincipalDep,
 ) -> CampaignResponse:
     try:
-        campaign = service.get_campaign(session, workspace.id, campaign_id)
+        campaign = _authorized(
+            lambda: service.get_campaign(
+                session, principal, workspace.id, campaign_id
+            )
+        )
     except service.CampaignNotFound:
         raise _not_found() from None
     return CampaignResponse.model_validate(campaign)
@@ -92,13 +98,10 @@ def get_campaign(
 
 @router.patch(
     "/{campaign_id}",
+    response_model=CampaignResponse,
     responses={
-        **_ERROR_RESPONSES,
-        200: {
-            "model": CampaignResponse,
-            "description": "Updated Campaign.",
-            "headers": {"Idempotency-Key": _IDEMPOTENCY_HEADER},
-        },
+        **_WRITE_RESPONSES,
+        404: {"model": ErrorResponse, "description": "Campaign not found."},
     },
 )
 def update_campaign(
@@ -106,98 +109,86 @@ def update_campaign(
     payload: CampaignUpdate,
     session: SessionDep,
     workspace: WorkspaceDep,
-    actor: PrincipalDep,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> CampaignResponse:
+    principal: PrincipalDep,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", description=_IDEMPOTENCY_DESCRIPTION),
+    ] = None,
+) -> CampaignResponse | JSONResponse:
     key = _required_key(idempotency_key)
-    fingerprint = _fingerprint(
-        "PATCH",
-        f"/campaigns/{campaign_id}",
-        payload.model_dump(mode="json", exclude_unset=True),
-    )
-    replay = _claim(session, workspace.id, key, fingerprint)
-    if replay is not None:
-        return _replayed(replay)
-    try:
-        campaign = service.update_campaign(
-            session, workspace.id, campaign_id, actor, payload
+    return _write_response(
+        lambda: service.update_campaign(
+            session,
+            principal,
+            workspace.id,
+            campaign_id,
+            key,
+            payload,
         )
-    except service.CampaignNotFound:
-        raise _not_found() from None
-    except service.CampaignArchivedError:
-        raise _http_conflict(
-            "campaign_archived", "Archived campaigns are read-only."
-        ) from None
-    except service.InvalidCampaignTransitionError as error:
-        raise _http_conflict(
-            "campaign_invalid_transition",
-            f"{error.current} -> {error.requested} is not a legal campaign transition.",
-        ) from None
-    session.flush()
-    session.refresh(campaign)
-    body = _campaign_body(campaign)
-    idempotency.attach(
-        session, workspace_id=workspace.id, key=key, status_code=200, body=body
     )
-    session.commit()
-    return CampaignResponse.model_validate(campaign)
 
 
-def _campaign_body(campaign: Any) -> dict[str, Any]:
-    return CampaignResponse.model_validate(campaign).model_dump(mode="json")
+def _write_response(
+    operation: Callable[[], idempotency.Replay],
+) -> CampaignResponse | JSONResponse:
+    try:
+        result = operation()
+    except idempotency.KeyConflictError:
+        raise _http_error(
+            status.HTTP_409_CONFLICT,
+            "idempotency_key_conflict",
+            "This key was already used for a different request.",
+        ) from None
+    except service.WorkspaceAccessDenied:
+        raise _forbidden() from None
+
+    if 200 <= result.status_code < 300:
+        return CampaignResponse.model_validate(result.body)
+    return JSONResponse(status_code=result.status_code, content=result.body)
 
 
-def _replayed(replay: idempotency.Replay) -> CampaignResponse:
-    return CampaignResponse.model_validate(replay.body)
+def _authorized(operation: Callable[[], T]) -> T:
+    try:
+        return operation()
+    except service.WorkspaceAccessDenied:
+        raise _forbidden() from None
 
 
 def _required_key(idempotency_key: str | None) -> str:
     key = (idempotency_key or "").strip()
     if not key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_error_body(
-                "idempotency_key_required",
-                "Writes require an Idempotency-Key header.",
-            ),
+        raise _http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "idempotency_key_required",
+            "Writes require an Idempotency-Key header.",
         )
-    return key[:200]
-
-
-def _fingerprint(method: str, path: str, payload: dict[str, Any]) -> str:
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(f"{method} {path} {canonical}".encode()).hexdigest()
-
-
-def _claim(
-    session: SessionDep, workspace_id: UUID, key: str, fingerprint: str
-) -> idempotency.Replay | None:
-    try:
-        return idempotency.claim(
-            session,
-            workspace_id=workspace_id,
-            key=key,
-            request_fingerprint=fingerprint,
+    if len(key) > 200:
+        raise _http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "idempotency_key_too_long",
+            "Idempotency-Key must be at most 200 characters.",
         )
-    except idempotency.KeyConflictError:
-        raise _http_conflict(
-            "idempotency_key_conflict",
-            "This key was already used for a different request.",
-        ) from None
-
-
-def _error_body(code: str, message: str) -> dict[str, str]:
-    return {"code": code, "message": message}
+    return key
 
 
 def _not_found() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=_error_body("campaign_not_found", "Campaign not found."),
+    return _http_error(
+        status.HTTP_404_NOT_FOUND,
+        "campaign_not_found",
+        "Campaign not found.",
     )
 
 
-def _http_conflict(code: str, message: str) -> HTTPException:
+def _forbidden() -> HTTPException:
+    return _http_error(
+        status.HTTP_403_FORBIDDEN,
+        "workspace_forbidden",
+        "The authenticated principal cannot access this workspace.",
+    )
+
+
+def _http_error(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(
-        status_code=status.HTTP_409_CONFLICT, detail=_error_body(code, message)
+        status_code=status_code,
+        detail={"code": code, "message": message},
     )

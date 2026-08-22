@@ -1,6 +1,7 @@
 """Campaign REST API at the FastAPI app boundary."""
 
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -8,7 +9,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
+from app.auth import Principal
+from app.campaigns import service as campaigns_service
 from app.main import create_app
 from app.workspaces import DEFAULT_WORKSPACE_ID
 
@@ -202,6 +206,21 @@ def test_foreign_workspace_campaigns_are_invisible(
     )
 
 
+def test_campaign_service_rejects_a_principal_without_workspace_access(
+    migrated_test_database: str,
+) -> None:
+    engine = create_engine(migrated_test_database)
+    principal = Principal(actor="outsider", workspace_ids=frozenset())
+    try:
+        with Session(engine) as session:
+            with pytest.raises(campaigns_service.WorkspaceAccessDenied):
+                campaigns_service.list_campaigns(
+                    session, principal, DEFAULT_WORKSPACE_ID
+                )
+    finally:
+        engine.dispose()
+
+
 def test_patch_updates_fields_without_touching_status(client: TestClient) -> None:
     created = created_campaign(client)
 
@@ -338,6 +357,18 @@ def test_writes_require_an_idempotency_key(client: TestClient) -> None:
     assert response.json()["detail"]["code"] == "idempotency_key_required"
 
 
+def test_writes_reject_overlong_idempotency_keys(client: TestClient) -> None:
+    response = client.post(
+        "/campaigns",
+        json=create_payload(),
+        headers=write_headers("x" * 201),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "idempotency_key_too_long"
+    assert client.get("/campaigns").json() == []
+
+
 def test_create_replay_returns_the_original_campaign_without_duplicating(
     client: TestClient, migrated_test_database: str
 ) -> None:
@@ -395,6 +426,36 @@ def test_transition_replay_returns_the_original_response_without_duplicate_audit
     assert len(transitions) == 1
 
 
+def test_transition_error_replay_preserves_the_original_result(
+    client: TestClient,
+) -> None:
+    created = created_campaign(client)
+    campaign_id = created["id"]
+    key = str(uuid.uuid4())
+
+    first = client.patch(
+        f"/campaigns/{campaign_id}",
+        json={"status": "paused"},
+        headers=write_headers(key),
+    )
+    activated = client.patch(
+        f"/campaigns/{campaign_id}",
+        json={"status": "active"},
+        headers=write_headers(),
+    )
+    replay = client.patch(
+        f"/campaigns/{campaign_id}",
+        json={"status": "paused"},
+        headers=write_headers(key),
+    )
+
+    assert first.status_code == 409
+    assert activated.status_code == 200
+    assert replay.status_code == 409
+    assert replay.json() == first.json()
+    assert client.get(f"/campaigns/{campaign_id}").json()["status"] == "active"
+
+
 def test_patch_rejects_explicit_null_on_non_nullable_fields(client: TestClient) -> None:
     created = created_campaign(client)
     campaign_id = created["id"]
@@ -440,46 +501,73 @@ def test_concurrent_transitions_never_produce_a_half_archived_campaign(
     )
 
     app = client.app
-    barrier = threading.Barrier(2)
     outcomes: dict[str, Any] = {}
 
-    def raw_archive() -> None:
-        engine = create_engine(migrated_test_database)
-        try:
-            barrier.wait()
-            with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "UPDATE campaigns SET status = 'archived', archived_at = now()"
-                        " WHERE id = :id"
-                    ),
-                    {"id": campaign_id},
-                )
-            outcomes["archive"] = "committed"
-        finally:
-            engine.dispose()
-
     def api_pause() -> None:
-        with TestClient(app, headers={"Authorization": f"Bearer {API_TOKEN}"}) as writer:
-            barrier.wait()
-            response = writer.patch(
-                f"/campaigns/{campaign_id}",
-                json={"status": "paused"},
-                headers=write_headers(),
-            )
+        try:
+            with TestClient(
+                app, headers={"Authorization": f"Bearer {API_TOKEN}"}
+            ) as writer:
+                response = writer.patch(
+                    f"/campaigns/{campaign_id}",
+                    json={"status": "paused"},
+                    headers=write_headers(),
+                )
             outcomes["pause"] = response.status_code
+        except BaseException as error:
+            outcomes["error"] = error
 
-    threads = [threading.Thread(target=raw_archive), threading.Thread(target=api_pause)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    engine = create_engine(migrated_test_database)
+    lock_connection = engine.connect()
+    lock_transaction = lock_connection.begin()
+    pause_thread = threading.Thread(target=api_pause)
+    observed_lock_wait = False
+    try:
+        lock_connection.execute(
+            text(
+                "UPDATE campaigns SET status = 'archived', archived_at = now()"
+                " WHERE id = :id"
+            ),
+            {"id": campaign_id},
+        )
+        pause_thread.start()
+
+        deadline = time.monotonic() + 5
+        with engine.connect() as observer:
+            while time.monotonic() < deadline and pause_thread.is_alive():
+                observed_lock_wait = bool(
+                    observer.execute(
+                        text(
+                            "SELECT EXISTS ("
+                            " SELECT 1 FROM pg_stat_activity"
+                            " WHERE datname = current_database()"
+                            " AND pid <> pg_backend_pid()"
+                            " AND wait_event_type = 'Lock'"
+                            " AND query ILIKE '%campaigns%'"
+                            " AND query ILIKE '%FOR UPDATE%'"
+                            ")"
+                        )
+                    ).scalar_one()
+                )
+                if observed_lock_wait:
+                    break
+                time.sleep(0.01)
+        lock_transaction.commit()
+    finally:
+        if lock_transaction.is_active:
+            lock_transaction.rollback()
+        lock_connection.close()
+        engine.dispose()
+
+    pause_thread.join(timeout=5)
 
     stored = client.get(f"/campaigns/{campaign_id}").json()
-    # Archive always lands (either before or after the pause); the pause
-    # either won first (then archived over it) or was refused afterward.
-    assert outcomes["archive"] == "committed"
-    assert outcomes["pause"] in (200, 409)
+    assert not pause_thread.is_alive()
+    assert "error" not in outcomes
+    assert observed_lock_wait
+    # The API read was forced to wait behind the archive row lock, so it must
+    # validate the newly committed terminal state rather than a stale ACTIVE.
+    assert outcomes["pause"] == 409
     assert stored["status"] == "archived"
     assert stored["archived_at"] is not None
 
@@ -506,16 +594,15 @@ def test_requests_fail_closed_when_the_default_workspace_is_missing(
 def test_crash_between_mutation_and_commit_rolls_back_and_retries_cleanly(
     client: TestClient, migrated_test_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.campaigns import router as campaigns_router
-    from app.campaigns import service as campaigns_service
-
-    real_create = campaigns_service.create_campaign
+    real_stage_create = campaigns_service._stage_create_campaign
 
     def crash_after_mutation(*args: Any, **kwargs: Any) -> Any:
-        real_create(*args, **kwargs)  # pending adds only; no commit anymore
+        real_stage_create(*args, **kwargs)
         raise RuntimeError("crash between mutation and commit")
 
-    monkeypatch.setattr(campaigns_service, "create_campaign", crash_after_mutation)
+    monkeypatch.setattr(
+        campaigns_service, "_stage_create_campaign", crash_after_mutation
+    )
     key = str(uuid.uuid4())
     with pytest.raises(RuntimeError):
         client.post("/campaigns", json=create_payload(), headers=write_headers(key))
