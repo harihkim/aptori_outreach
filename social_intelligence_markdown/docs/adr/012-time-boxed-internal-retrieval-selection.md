@@ -4,6 +4,7 @@
 - **Date:** 2026-08-21
 - **Review date:** 2026-09-20
 - **Creates an exception to:** [ADR-009](009-retrieval-viability-gate-and-escalation.md)
+- **Smoke-gate semantics amended by:** [ADR-015](015-stratify-provisional-retrieval-smoke.md)
 
 ## Context
 
@@ -31,6 +32,10 @@ There is no hidden provider hopping. A discovery or fetch attempt persists its o
 
 ### Prototype smoke gate
 
+The original ten-thread 8/10 baseline below remains authoritative. ADR-015
+stratifies later stress fixtures into explicit outcome checks so corpus growth
+cannot dilute this denominator.
+
 Freeze the fixtures and exact runtime configuration before scoring.
 
 **Discovery smoke:**
@@ -52,7 +57,7 @@ Freeze the fixtures and exact runtime configuration before scoring.
 
 Suspend the provisional selection before the review date if any of these occurs:
 
-- three consecutive frozen smoke batches fall below 80% successful, sufficiently complete thread retrieval;
+- three consecutive frozen smoke batches fail the combined ADR-015 baseline-and-stress thread gate;
 - operation requires an account/session, CAPTCHA continuation, stealth, a residential proxy, proxy rotation, or identity rotation;
 - material binary, browser, configuration, endpoint, or execution-environment drift means the recorded evidence no longer represents the runtime;
 - an external user or external pilot is proposed.

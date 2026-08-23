@@ -12,6 +12,7 @@ const {
     replayThreadArtifact,
 } = require('../src/index.js');
 const { sha256 } = require('../src/json.js');
+const { evaluateThreadGate } = require('../src/smoke-gate.js');
 
 const repositoryRoot = path.resolve(__dirname, '../../..');
 const smokeRoot = path.join(repositoryRoot, 'retrieval-eval/prototype-smoke');
@@ -123,27 +124,25 @@ async function main() {
             return true;
         }
     }).length;
+    const threadGateResult = evaluateThreadGate({
+        threadGate: protocol.threadGate,
+        threads: threadDocument.threads,
+        runs: threadRuns,
+    });
     const threadRunSummaries = threadRuns.map((items, index) => ({
-        runNumber: index + 1,
+        ...threadGateResult.runs[index],
         successCount: items.filter(item => item.status === 'success').length,
         incompleteCount: items.filter(item => item.status === 'incomplete').length,
-        invalidTreeCount: items.filter(item => item.normalized && (
-            item.normalized.validation.duplicateIds.length
-            || item.normalized.validation.missingParentReferences.length
-        )).length,
         observations: items.map(summarizeObservation),
     }));
     const passed = discoverySuccessCount >= protocol.discoveryGate.minimumQueriesWithCandidate
         && invalidCandidateCount === 0
-        && threadRunSummaries.every(run => (
-            run.successCount >= protocol.threadGate.minimumSuccessfulThreadsPerRun
-            && run.invalidTreeCount === 0
-        ))
+        && threadGateResult.passed
         && replayChecks.length > 0
         && replayChecks.every(check => check.matches);
 
     const report = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         evaluationId: protocol.evaluationId,
         runId,
         sourceCommit,
@@ -158,10 +157,9 @@ async function main() {
             observations: discovery.map(summarizeObservation),
         },
         threadFetch: {
-            passed: threadRunSummaries.every(run => (
-                run.successCount >= protocol.threadGate.minimumSuccessfulThreadsPerRun
-                && run.invalidTreeCount === 0
-            )),
+            passed: threadGateResult.passed,
+            baselineCohort: protocol.threadGate.baselineCohort,
+            fixtureExpectations: protocol.threadGate.fixtureExpectations,
             runs: threadRunSummaries,
         },
         replay: {

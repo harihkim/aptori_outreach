@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "evaluationId": "adr012-prototype-smoke-2026-08-v2",
+  "decision": "ADR-012",
+  "frozenAt": "2026-08-21",
+  "reviewDate": "2026-09-20",
+  "sourceRevisionPolicy": "Use the clean Git HEAD containing this protocol; every report records that commit SHA.",
+  "revisionNote": "v2 expands the known-thread corpus from ten to fourteen fixtures (locked, high-volume, negative-counter-delta, and exhausted-tree shapes) and records the reported-comment counter delta in every normalized observation. v1 reports remain comparable through their recorded fixture hashes.",
+  "environment": "WSL",
+  "accessBoundary": {
+    "anonymous": true,
+    "standardObscuraOnly": true,
+    "accountsOrAuthenticatedSessions": false,
+    "captchaOrChallengeContinuation": false,
+    "stealth": false,
+    "residentialProxy": false,
+    "proxyRotation": false,
+    "identityRotation": false,
+    "automaticProviderFallback": false
+  },
+  "artifacts": {
+    "queries": "queries-2026-08.json",
+    "knownThreads": "known-threads-2026-08.json",
+    "discoveryConfig": "provider-configs/obscura-duckduckgo-lite.json",
+    "threadConfig": "provider-configs/obscura-reddit-thread.json"
+  },
+  "discoveryGate": {
+    "queryCount": 10,
+    "minimumQueriesWithCandidate": 8,
+    "candidateRequirement": "Every emitted candidate is a canonical Reddit thread URL.",
+    "failureRequirement": "Empty, blocked, parse, and transport outcomes remain explicit."
+  },
+  "threadGate": {
+    "threadCount": 14,
+    "runCount": 2,
+    "minimumSuccessfulThreadsPerRun": 9,
+    "successRequiresSourceTreeExhausted": true,
+    "maximumDuplicateCommentIds": 0,
+    "maximumMissingParentReferences": 0,
+    "unresolvedMoreStatus": "incomplete",
+    "replayHashMatch": "100%",
+    "expectedNonSuccessThreadIds": [
+      "t01-askrobotics-deep-self-post",
+      "t11-netsec-truecrypt-eol-high-volume",
+      "t12-cybersecurity-usaid-breach-locked",
+      "t13-netsec-sha1-collision-negative-counter"
+    ],
+    "expectedNonSuccessNote": "t01 is the retained block-regression fixture from v1. t11 is intentionally beyond the fetch limit, and t12/t13 sit at the near-complete boundary with heavy deleted-comment trees; they stress honest incompleteness classification rather than success."
+  }
+}

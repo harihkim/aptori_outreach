@@ -1,11 +1,11 @@
 {
-  "schemaVersion": 1,
-  "evaluationId": "adr012-prototype-smoke-2026-08-v2",
-  "decision": "ADR-012",
-  "frozenAt": "2026-08-21",
+  "schemaVersion": 2,
+  "evaluationId": "adr015-prototype-smoke-2026-08-v3",
+  "decision": "ADR-015 (amends ADR-012)",
+  "frozenAt": "2026-08-23",
   "reviewDate": "2026-09-20",
   "sourceRevisionPolicy": "Use the clean Git HEAD containing this protocol; every report records that commit SHA.",
-  "revisionNote": "v2 expands the known-thread corpus from ten to fourteen fixtures (locked, high-volume, negative-counter-delta, and exhausted-tree shapes) and records the reported-comment counter delta in every normalized observation. v1 reports remain comparable through their recorded fixture hashes.",
+  "revisionNote": "v3 preserves the original ten-thread 8/10 baseline and evaluates the four added stress fixtures against explicit acceptable outcomes. This removes stress fixtures from the success-rate denominator without weakening the original ADR-012 bar. protocol-v2.json preserves the superseded v2 gate exactly.",
   "environment": "WSL",
   "accessBoundary": {
     "anonymous": true,
@@ -33,18 +33,53 @@
   "threadGate": {
     "threadCount": 14,
     "runCount": 2,
-    "minimumSuccessfulThreadsPerRun": 9,
     "successRequiresSourceTreeExhausted": true,
     "maximumDuplicateCommentIds": 0,
     "maximumMissingParentReferences": 0,
     "unresolvedMoreStatus": "incomplete",
     "replayHashMatch": "100%",
-    "expectedNonSuccessThreadIds": [
-      "t01-askrobotics-deep-self-post",
-      "t11-netsec-truecrypt-eol-high-volume",
-      "t12-cybersecurity-usaid-breach-locked",
-      "t13-netsec-sha1-collision-negative-counter"
+    "baselineCohort": {
+      "threadIds": [
+        "t01-askrobotics-deep-self-post",
+        "t02-cybersecurity-api-security",
+        "t03-cybersecurity-api-testing",
+        "t04-devsecops-api-security",
+        "t05-cybersecurity-scanner-recommendations",
+        "t06-cybersecurity-api-assessment",
+        "t07-softwarearchitecture-api-keys",
+        "t08-googlecloud-unauthenticated-api",
+        "t09-springboot-api-authorization",
+        "t10-cybersecurity-api-stig"
+      ],
+      "minimumSuccessfulThreadsPerRun": 8
+    },
+    "fixtureExpectations": [
+      {
+        "threadId": "t01-askrobotics-deep-self-post",
+        "allowedStatuses": ["blocked", "success"],
+        "reason": "Retained access-regression fixture; an explicit block or a complete successful fetch is acceptable."
+      },
+      {
+        "threadId": "t11-netsec-truecrypt-eol-high-volume",
+        "allowedStatuses": ["incomplete"],
+        "reason": "The frozen fetch limit intentionally cannot exhaust this high-volume tree."
+      },
+      {
+        "threadId": "t12-cybersecurity-usaid-breach-locked",
+        "allowedStatuses": ["incomplete", "success"],
+        "reason": "This near-complete boundary must be classified honestly; future complete exhaustion is also acceptable."
+      },
+      {
+        "threadId": "t13-netsec-sha1-collision-negative-counter",
+        "allowedStatuses": ["incomplete", "success"],
+        "reason": "This near-complete boundary must be classified honestly; counter lag alone never decides completeness."
+      },
+      {
+        "threadId": "t14-cybersecurity-bills-twitter-hack-exhausted",
+        "allowedStatuses": ["success"],
+        "reason": "The tree is exhaustible despite deleted comments and a negative reported-comment delta."
+      }
     ],
-    "expectedNonSuccessNote": "t01 is the retained block-regression fixture from v1. t11 is intentionally beyond the fetch limit, and t12/t13 sit at the near-complete boundary with heavy deleted-comment trees; they stress honest incompleteness classification rather than success."
+    "cohortPolicy": "The original ten fixtures retain the ADR-012 8/10 success floor. Added stress fixtures are evaluated for acceptable explicit outcomes and never dilute that denominator."
   }
 }
