@@ -12,6 +12,7 @@ import {
 	updateSubmissionId,
 	type Campaign
 } from '$lib/campaigns';
+import { discoverySubmissionId } from '$lib/discovery';
 
 vi.mock('$app/navigation', () => ({ invalidate: vi.fn() }));
 
@@ -54,6 +55,9 @@ function pageData(
 		for (const action of nextActions(item.status)) {
 			submissionKeys[transitionSubmissionId(item.id, action.status)] =
 				`key:transition:${item.id}:${action.status}`;
+		}
+		if (item.status === 'active') {
+			submissionKeys[discoverySubmissionId(item.id)] = `key:discovery:${item.id}`;
 		}
 	}
 	return { apiReachable, detail, campaigns, nextCursor, currentCursor, submissionKeys };
@@ -240,8 +244,8 @@ describe('campaigns/+page.svelte', () => {
 			return input?.value;
 		});
 
-		expect(keys).toHaveLength(4);
-		expect(new Set(keys).size).toBe(4);
+		expect(keys).toHaveLength(5);
+		expect(new Set(keys).size).toBe(5);
 	});
 
 	it('restores a failed key only to the form that submitted it', () => {
@@ -277,5 +281,35 @@ describe('campaigns/+page.svelte', () => {
 		});
 
 		expect(screen.getByText('Backend did not answer')).toBeInTheDocument();
+	});
+
+	it('offers Run discovery only on active campaigns', () => {
+		const active = campaign({ id: 'active-campaign', name: 'Live campaign', status: 'active' });
+		const draft = campaign({ id: 'draft-campaign', name: 'Draft campaign', status: 'draft' });
+		render(Page, { data: pageData([active, draft]) });
+
+		expect(screen.getByRole('button', { name: 'Run discovery' })).toBeInTheDocument();
+
+		const startForm = document.querySelector(
+			'form[action="?/start-discovery"]'
+		) as HTMLFormElement;
+		expect(startForm).not.toBeNull();
+		expect(
+			(startForm.querySelector('input[name="campaign_id"]') as HTMLInputElement).value
+		).toBe('active-campaign');
+		expect(
+			(startForm.querySelector('input[name="idempotency_key"]') as HTMLInputElement).value
+		).toBe('key:discovery:active-campaign');
+	});
+
+	it('keeps discovery out of reach for draft and archived campaigns', () => {
+		render(Page, {
+			data: pageData([
+				campaign({ id: 'a', name: 'Still drafting', status: 'draft' }),
+				campaign({ id: 'b', name: 'Long gone', status: 'archived' })
+			])
+		});
+
+		expect(screen.queryByRole('button', { name: 'Run discovery' })).not.toBeInTheDocument();
 	});
 });

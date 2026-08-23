@@ -13,6 +13,7 @@
 		type Campaign,
 		type PromotionPosture
 	} from '$lib/campaigns';
+	import { discoverySubmissionId } from '$lib/discovery';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form = null }: { data: PageData; form?: ActionData } = $props();
@@ -231,6 +232,22 @@
 
 					{#if campaign.status !== 'archived'}
 						<div class="flex flex-wrap gap-2">
+							{#if campaign.status === 'active'}
+								<form method="POST" action="?/start-discovery">
+									<input type="hidden" name="campaign_id" value={campaign.id} />
+									<input
+										type="hidden"
+										name="submission_id"
+										value={discoverySubmissionId(campaign.id)}
+									/>
+									<input
+										type="hidden"
+										name="idempotency_key"
+										value={keyFor(discoverySubmissionId(campaign.id))}
+									/>
+									<Button type="submit" size="sm">Run discovery</Button>
+								</form>
+							{/if}
 							{#each nextActions(campaign.status) as action (action.status)}
 								<form method="POST" action="?/transition">
 									<input type="hidden" name="campaign_id" value={campaign.id} />

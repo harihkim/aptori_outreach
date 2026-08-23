@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
-import { fail } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 import {
@@ -13,6 +13,7 @@ import {
 	updateSubmissionId,
 	type Campaign
 } from '$lib/campaigns';
+import { discoverySubmissionId, explainDiscoveryError } from '$lib/discovery';
 
 const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -104,6 +105,11 @@ function buildSubmissionKeys(campaigns: Campaign[]): Record<string, string> {
 		}
 		for (const action of nextActions(campaign.status)) {
 			keys[transitionSubmissionId(campaign.id, action.status)] = crypto.randomUUID();
+		}
+		// Discovery starts on active campaigns only; the backend still
+		// enforces the truth, the key just pre-provisions the attempt.
+		if (campaign.status === 'active') {
+			keys[discoverySubmissionId(campaign.id)] = crypto.randomUUID();
 		}
 	}
 	return keys;
@@ -208,5 +214,39 @@ export const actions: Actions = {
 			});
 		}
 		return { transitioned: true };
+	},
+
+	'start-discovery': async ({ request, fetch }) => {
+		const form = await request.formData();
+		const campaignId = requiredText(form, 'campaign_id');
+		const key = submissionKey(form);
+		// An empty object is the whole contract today; the backend enforces
+		// that the campaign is ACTIVE regardless of what this form claims.
+		const result = await callApi(
+			fetch,
+			'POST',
+			`/campaigns/${campaignId}/discovery-runs`,
+			{},
+			{ write: true, idempotencyKey: key }
+		);
+		if (!result.ok) {
+			return fail(400, {
+				message:
+					result.status === 0
+						? 'Backend did not answer.'
+						: explainDiscoveryError(result.status, result.body),
+				submission_id: discoverySubmissionId(campaignId),
+				idempotency_key: key
+			});
+		}
+		const runId = (result.body as { id?: unknown } | null)?.id;
+		if (typeof runId !== 'string' || !runId) {
+			return fail(400, {
+				message: 'Unexpected response (missing run id).',
+				submission_id: discoverySubmissionId(campaignId),
+				idempotency_key: key
+			});
+		}
+		throw redirect(303, `/campaigns/${campaignId}/runs/${runId}`);
 	}
 };
