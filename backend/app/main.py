@@ -27,7 +27,10 @@ def create_app(
     api_token: str | None | _UnsetApiToken = _UNSET_API_TOKEN,
 ) -> FastAPI:
     settings = get_settings()
-    manager = DatabaseSessionManager(database_url or settings.database_url)
+    manager = DatabaseSessionManager(
+        database_url or settings.database_url,
+        connect_timeout_seconds=settings.database_connect_timeout_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:

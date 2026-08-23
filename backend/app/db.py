@@ -12,9 +12,20 @@ logger = logging.getLogger(__name__)
 class DatabaseSessionManager:
     """App-scoped engine and session factory; one per application instance."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, connect_timeout_seconds: int = 3) -> None:
         self.database_url = database_url
-        self.engine: Engine = create_engine(database_url, future=True, pool_pre_ping=True)
+        url = make_url(database_url)
+        connect_args = (
+            {"connect_timeout": connect_timeout_seconds}
+            if url.drivername.startswith("postgresql")
+            else {}
+        )
+        self.engine: Engine = create_engine(
+            database_url,
+            future=True,
+            pool_pre_ping=True,
+            connect_args=connect_args,
+        )
         self.session_factory = sessionmaker(bind=self.engine, future=True, expire_on_commit=False)
 
     def session(self) -> Generator[Session, None, None]:

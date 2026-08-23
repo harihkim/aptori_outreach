@@ -1,10 +1,13 @@
 """Health endpoint, session management, and app lifecycle behavior."""
 
 import logging
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 
 from app.db import DatabaseSessionManager
 from app.main import create_app
@@ -89,3 +92,31 @@ def test_session_manager_yields_working_sessions(migrated_test_database: str) ->
     session = next(sessions)
     assert session.execute(text("SELECT 1")).scalar() == 1
     sessions.close()
+
+
+def test_database_connections_receive_a_bounded_connect_timeout(
+    migrated_test_database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    real_create_engine = create_engine
+
+    def create_engine_spy(url: str, **kwargs: Any) -> Engine:
+        captured.update(kwargs)
+        return real_create_engine(url, **kwargs)
+
+    monkeypatch.setattr("app.db.create_engine", create_engine_spy)
+    manager = DatabaseSessionManager(
+        migrated_test_database,
+        connect_timeout_seconds=4,
+    )
+    try:
+        assert captured["connect_args"] == {"connect_timeout": 4}
+    finally:
+        manager.dispose()
+
+
+def test_backend_env_file_is_anchored_to_the_backend_directory() -> None:
+    from app.config import BACKEND_ENV_FILE, Settings
+
+    assert BACKEND_ENV_FILE == Path(__file__).resolve().parents[1] / ".env"
+    assert Path(str(Settings.model_config["env_file"])).is_absolute()
