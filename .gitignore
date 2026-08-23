@@ -29,6 +29,9 @@ storage/
 retrieval-eval/prototype-smoke/results/
 experiments/evidence/
 
+# Discovery run evidence (attempt dirs, observation.json, raw artifacts)
+evidence-runs/
+
 # Editor and operating-system files
 .DS_Store
 .idea/
