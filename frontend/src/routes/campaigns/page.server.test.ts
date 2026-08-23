@@ -5,7 +5,7 @@ vi.mock('$env/dynamic/public', () => ({
 	env: { PUBLIC_API_BASE_URL: 'http://api.test' }
 }));
 
-import { actions } from './+page.server';
+import { actions, load } from './+page.server';
 import { CREATE_SUBMISSION_ID } from '$lib/campaigns';
 
 function createRequest(key: string): Request {
@@ -47,5 +47,24 @@ describe('campaign create action', () => {
 			const headers = new Headers(call[1]?.headers);
 			expect(headers.get('Idempotency-Key')).toBe('stable-create-key');
 		}
+	});
+});
+
+describe('campaign page load', () => {
+	it('surfaces stable backend configuration guidance', async () => {
+		const requestFetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ detail: { code: 'api_token_unconfigured' } }), {
+				status: 503,
+				headers: { 'content-type': 'application/json' }
+			})
+		);
+
+		const result = await load({ fetch: requestFetch, depends: vi.fn() } as never);
+		if (!result) {
+			throw new Error('campaign page load returned no data');
+		}
+
+		expect(result.detail).toBe('The backend has no API token configured.');
+		expect(result.campaigns).toEqual([]);
 	});
 });

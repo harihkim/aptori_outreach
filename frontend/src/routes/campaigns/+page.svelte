@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { invalidate } from '$app/navigation';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import {
 		CREATE_SUBMISSION_ID,
+		DEFAULT_PROMOTION_POSTURE,
 		nextActions,
 		transitionSubmissionId,
 		updateSubmissionId,
@@ -13,6 +16,8 @@
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form = null }: { data: PageData; form?: ActionData } = $props();
+	let refreshing = $state(false);
+	let replacementKeys = $state<Record<string, string>>({});
 
 	const postures: { value: PromotionPosture; label: string }[] = [
 		{ value: 'expertise_first', label: 'Expertise first' },
@@ -26,6 +31,10 @@
 
 	function createdOn(campaign: Campaign): string {
 		return campaign.createdAt.slice(0, 10);
+	}
+
+	function updatedOn(campaign: Campaign): string {
+		return campaign.updatedAt.slice(0, 10);
 	}
 
 	function statusVariant(status: Campaign['status']): 'secondary' | 'outline' {
@@ -45,6 +54,9 @@
 	}
 
 	function keyFor(submissionId: string): string {
+		if (replacementKeys[submissionId]) {
+			return replacementKeys[submissionId];
+		}
 		if (
 			form &&
 			'submission_id' in form &&
@@ -55,6 +67,19 @@
 			return form.idempotency_key;
 		}
 		return data.submissionKeys[submissionId] ?? '';
+	}
+
+	function startNewAttempt(submissionId: string): void {
+		replacementKeys[submissionId] = crypto.randomUUID();
+	}
+
+	async function refresh(): Promise<void> {
+		refreshing = true;
+		try {
+			await invalidate('app:campaigns');
+		} finally {
+			refreshing = false;
+		}
 	}
 </script>
 
@@ -111,7 +136,10 @@
 		<label for={fieldId('promotion_posture', suffix)} class="text-sm font-medium">Promotion posture</label>
 		<select id={fieldId('promotion_posture', suffix)} name="promotion_posture" class="input">
 			{#each postures as posture (posture.value)}
-				<option value={posture.value} selected={campaign !== null && posture.value === campaign.promotionPosture}>
+				<option
+					value={posture.value}
+					selected={posture.value === (campaign?.promotionPosture ?? DEFAULT_PROMOTION_POSTURE)}
+				>
 					{posture.label}
 				</option>
 			{/each}
@@ -120,11 +148,19 @@
 {/snippet}
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
-	<header class="flex flex-col gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Campaigns</h1>
-		<p class="text-sm text-muted-foreground">
-			Research objectives: positioning, constraints, and lifecycle for each Campaign.
-		</p>
+	<header class="flex items-start justify-between gap-4">
+		<div class="flex flex-col gap-1">
+			<h1 class="text-2xl font-semibold tracking-tight">Campaigns</h1>
+			<p class="text-sm text-muted-foreground">
+				Research objectives: positioning, constraints, and lifecycle for each Campaign.
+			</p>
+		</div>
+		<Button onclick={refresh} disabled={refreshing} variant="outline" size="sm">
+			{#if refreshing}
+				<Spinner data-icon="inline-start" />
+			{/if}
+			Refresh
+		</Button>
 	</header>
 
 	{#if data.detail}
@@ -133,9 +169,19 @@
 		</p>
 	{/if}
 	{#if form?.message}
-		<p class="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
-			{form.message}
-		</p>
+		<div class="flex items-center justify-between gap-3 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3" role="alert">
+			<p class="text-sm text-destructive">{form.message}</p>
+			{#if 'submission_id' in form && typeof form.submission_id === 'string'}
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					onclick={() => startNewAttempt(form.submission_id as string)}
+				>
+					Start new attempt
+				</Button>
+			{/if}
+		</div>
 	{/if}
 
 	<Card.Root>
@@ -168,7 +214,7 @@
 						<Badge variant={statusVariant(campaign.status)}>{campaign.status}</Badge>
 					</div>
 					<Card.Description>
-						{postureLabel(campaign.promotionPosture)} · created {createdOn(campaign)}
+						{postureLabel(campaign.promotionPosture)} · created {createdOn(campaign)} · updated {updatedOn(campaign)}
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="flex flex-col gap-3">

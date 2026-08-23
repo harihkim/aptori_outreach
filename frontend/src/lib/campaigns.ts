@@ -1,6 +1,8 @@
 export type CampaignStatus = 'draft' | 'active' | 'paused' | 'archived';
 export type PromotionPosture = 'expertise_first' | 'balanced' | 'high_intent_only';
 
+export const DEFAULT_PROMOTION_POSTURE: PromotionPosture = 'expertise_first';
+
 export type CampaignBody = {
 	id: string;
 	workspace_id: string;
@@ -32,6 +34,7 @@ export type Campaign = {
 	approvedClaims: string[];
 	prohibitedClaims: string[];
 	createdAt: string;
+	updatedAt: string;
 	archivedAt: string | null;
 };
 
@@ -104,7 +107,11 @@ export function parseCampaignsResponse({
 		detail: `Unexpected response (HTTP ${httpStatus})`
 	};
 
-	if (httpStatus !== 200 || !Array.isArray(body)) {
+	if (httpStatus !== 200) {
+		return { ...unexpected, detail: explainCampaignError(httpStatus, body) };
+	}
+
+	if (!Array.isArray(body)) {
 		return unexpected;
 	}
 
@@ -126,6 +133,7 @@ export function parseCampaignsResponse({
 			approvedClaims: entry.approved_claims,
 			prohibitedClaims: entry.prohibited_claims,
 			createdAt: entry.created_at,
+			updatedAt: entry.updated_at,
 			archivedAt: entry.archived_at
 		});
 	}

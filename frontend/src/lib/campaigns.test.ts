@@ -49,6 +49,7 @@ describe('parseCampaignsResponse', () => {
 					approvedClaims: ['Aptori runs in CI'],
 					prohibitedClaims: [],
 					createdAt: '2026-08-22T10:00:00Z',
+					updatedAt: '2026-08-22T10:00:00Z',
 					archivedAt: null
 				}
 			],
@@ -115,6 +116,21 @@ describe('parseCampaignsResponse', () => {
 			campaigns: [],
 			detail: 'Backend did not answer'
 		});
+	});
+
+	it('translates stable backend errors on the initial listing', () => {
+		expect(
+			parseCampaignsResponse({
+				httpStatus: 503,
+				body: { detail: { code: 'api_token_unconfigured' } }
+			}).detail
+		).toBe('The backend has no API token configured.');
+		expect(
+			parseCampaignsResponse({
+				httpStatus: 403,
+				body: { detail: { code: 'workspace_forbidden' } }
+			}).detail
+		).toBe('The backend token cannot access this workspace.');
 	});
 });
 

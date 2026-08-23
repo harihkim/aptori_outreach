@@ -1,9 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 
-import { cleanup, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Page from './+page.svelte';
+import { invalidate } from '$app/navigation';
 import {
 	CREATE_SUBMISSION_ID,
 	nextActions,
@@ -30,6 +31,7 @@ function campaign(overrides: Partial<Campaign>): Campaign {
 		approvedClaims: [],
 		prohibitedClaims: [],
 		createdAt: '2026-08-22T10:00:00Z',
+		updatedAt: '2026-08-23T11:00:00Z',
 		archivedAt: null,
 		...overrides
 	};
@@ -100,10 +102,19 @@ describe('campaigns/+page.svelte', () => {
 		// Scoped: per-campaign edit forms repeat the same field labels.
 		expect(within(createForm).getByLabelText('Name')).toBeRequired();
 		expect(within(createForm).getByLabelText('Promotion posture')).toBeInTheDocument();
+		expect(within(createForm).getByLabelText('Promotion posture')).toHaveValue(
+			'expertise_first'
+		);
 		expect(within(createForm).getByLabelText('Keywords')).toBeInTheDocument();
 		expect(within(createForm).getByLabelText('Approved claims')).toBeInTheDocument();
 		expect(within(createForm).getByLabelText('Prohibited claims')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Create campaign' })).toBeInTheDocument();
+	});
+
+	it('shows when each campaign last changed', () => {
+		render(Page, { data: pageData([campaign({ id: 'a', name: 'Changed campaign' })]) });
+
+		expect(screen.getByText(/updated 2026-08-23/)).toBeInTheDocument();
 	});
 
 	it('summarizes the claim policy on campaigns that carry one', () => {
@@ -169,6 +180,37 @@ describe('campaigns/+page.svelte', () => {
 			'input[name="idempotency_key"]'
 		) as HTMLInputElement;
 		expect(hidden.value).toBe('stable-key');
+	});
+
+	it('lets an operator intentionally start a new logical attempt', async () => {
+		render(Page, {
+			data: pageData(),
+			form: {
+				message: 'That lifecycle change is not allowed.',
+				submission_id: CREATE_SUBMISSION_ID,
+				idempotency_key: 'recorded-error-key'
+			}
+		});
+
+		const createForm = document.querySelector('form[action="?/create"]') as HTMLElement;
+		const hidden = createForm.querySelector(
+			'input[name="idempotency_key"]'
+		) as HTMLInputElement;
+		expect(hidden.value).toBe('recorded-error-key');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Start new attempt' }));
+
+		expect(hidden.value).not.toBe('recorded-error-key');
+		expect(hidden.value).toMatch(/^[0-9a-f-]{36}$/);
+	});
+
+	it('refreshes the campaign dependency without a full page reload', async () => {
+		vi.mocked(invalidate).mockResolvedValue(undefined);
+		render(Page, { data: pageData() });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+		expect(invalidate).toHaveBeenCalledWith('app:campaigns');
 	});
 
 	it('gives every logical form its own submission key', () => {
