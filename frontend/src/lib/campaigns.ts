@@ -42,6 +42,7 @@ export type CampaignsState = {
 	/** The backend answered our request, whatever it said. */
 	apiReachable: boolean;
 	campaigns: Campaign[];
+	nextCursor: string | null;
 	detail: string | null;
 };
 
@@ -98,12 +99,18 @@ export function parseCampaignsResponse({
 	body: unknown;
 }): CampaignsState {
 	if (httpStatus === null) {
-		return { apiReachable: false, campaigns: [], detail: 'Backend did not answer' };
+		return {
+			apiReachable: false,
+			campaigns: [],
+			nextCursor: null,
+			detail: 'Backend did not answer'
+		};
 	}
 
 	const unexpected: CampaignsState = {
 		apiReachable: true,
 		campaigns: [],
+		nextCursor: null,
 		detail: `Unexpected response (HTTP ${httpStatus})`
 	};
 
@@ -111,12 +118,19 @@ export function parseCampaignsResponse({
 		return { ...unexpected, detail: explainCampaignError(httpStatus, body) };
 	}
 
-	if (!Array.isArray(body)) {
+	if (typeof body !== 'object' || body === null) {
+		return unexpected;
+	}
+	const page = body as Record<string, unknown>;
+	if (
+		!Array.isArray(page.items) ||
+		!(page.next_cursor === null || typeof page.next_cursor === 'string')
+	) {
 		return unexpected;
 	}
 
 	const campaigns: Campaign[] = [];
-	for (const entry of body) {
+	for (const entry of page.items) {
 		if (!isCampaignBody(entry)) {
 			return unexpected;
 		}
@@ -138,7 +152,12 @@ export function parseCampaignsResponse({
 		});
 	}
 
-	return { apiReachable: true, campaigns, detail: null };
+	return {
+		apiReachable: true,
+		campaigns,
+		nextCursor: page.next_cursor,
+		detail: null
+	};
 }
 
 function isCampaignBody(value: unknown): value is ValidatedCampaignBody {
@@ -212,6 +231,8 @@ export function explainCampaignError(httpStatus: number, body: unknown): string 
 			return 'The backend database needs its migrations run.';
 		case 'workspace_forbidden':
 			return 'The backend token cannot access this workspace.';
+		case 'page_cursor_invalid':
+			return 'That campaign page link is invalid; return to the newest campaigns.';
 		case 'idempotency_key_required':
 			return 'The form lost its submission key; refresh and try again.';
 		case 'idempotency_key_too_long':

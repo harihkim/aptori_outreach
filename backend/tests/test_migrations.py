@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0004_reconcile_idempotency"
+HEAD_REVISION = "0005_stable_page_order"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -36,6 +36,10 @@ def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database:
             "audit_events",
             "idempotency_events",
         }
+        campaign_columns = {column["name"] for column in inspect(connection).get_columns("campaigns")}
+        audit_columns = {column["name"] for column in inspect(connection).get_columns("audit_events")}
+        assert "creation_order" in campaign_columns
+        assert "event_order" in audit_columns
 
 
 def test_migration_seeds_the_default_workspace(migrated_test_database: str) -> None:
@@ -93,3 +97,46 @@ def test_migration_reconciles_legacy_pending_idempotency_rows(
         connection.execute(
             text("DELETE FROM idempotency_events WHERE key = 'legacy-pending'")
         )
+
+
+def test_stable_order_migration_backfills_existing_rows(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.downgrade(alembic_cfg, "0004_reconcile_idempotency")
+    campaign_id = "00000000-0000-0000-0000-000000000005"
+    event_id = "00000000-0000-0000-0000-000000000006"
+
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO campaigns "
+                "(id, workspace_id, name, promotion_posture) "
+                "VALUES (:id, :workspace, 'legacy', 'expertise_first')"
+            ),
+            {"id": campaign_id, "workspace": str(DEFAULT_WORKSPACE_ID)},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO audit_events "
+                "(id, actor, action, target_type, target_id) "
+                "VALUES (:id, 'operator', 'campaign.created', 'campaign', :target)"
+            ),
+            {"id": event_id, "target": campaign_id},
+        )
+
+    command.upgrade(alembic_cfg, "head")
+
+    with create_engine(migrated_test_database).begin() as connection:
+        campaign_order = connection.execute(
+            text("SELECT creation_order FROM campaigns WHERE id = :id"),
+            {"id": campaign_id},
+        ).scalar_one()
+        event_order = connection.execute(
+            text("SELECT event_order FROM audit_events WHERE id = :id"),
+            {"id": event_id},
+        ).scalar_one()
+        assert campaign_order > 0
+        assert event_order > 0
+        connection.execute(text("DELETE FROM audit_events WHERE id = :id"), {"id": event_id})
+        connection.execute(text("DELETE FROM campaigns WHERE id = :id"), {"id": campaign_id})

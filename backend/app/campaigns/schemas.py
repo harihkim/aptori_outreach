@@ -100,6 +100,11 @@ class CampaignResponse(BaseModel):
     archived_at: datetime | None
 
 
+class CampaignPageResponse(BaseModel):
+    items: list[CampaignResponse]
+    next_cursor: str | None
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

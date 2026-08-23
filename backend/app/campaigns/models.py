@@ -1,7 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,9 +36,13 @@ class Campaign(Base):
         CheckConstraint(
             _in_values("promotion_posture", CAMPAIGN_POSTURES), name="posture_values"
         ),
+        Index("ix_campaigns_workspace_creation_order", "workspace_id", "creation_order"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    creation_order: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), unique=True
+    )
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), index=True
     )

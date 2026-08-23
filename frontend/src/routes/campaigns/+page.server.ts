@@ -124,16 +124,27 @@ function campaignPayload(form: FormData): Record<string, string | string[] | nul
 	};
 }
 
-export const load: PageServerLoad = async ({ fetch, depends }) => {
+export const load: PageServerLoad = async ({ fetch, depends, url }) => {
 	depends('app:campaigns');
 
-	const result = await callApi(fetch, 'GET', '/campaigns', null, { timeoutMs: 3000 });
+	const currentCursor = url.searchParams.get('cursor');
+	const query = new URLSearchParams({ limit: '50' });
+	if (currentCursor) {
+		query.set('cursor', currentCursor);
+	}
+	const result = await callApi(fetch, 'GET', `/campaigns?${query}`, null, {
+		timeoutMs: 3000
+	});
 	const state = parseCampaignsResponse({
 		httpStatus: result.status || null,
 		body: result.body
 	});
 
-	return { ...state, submissionKeys: buildSubmissionKeys(state.campaigns) };
+	return {
+		...state,
+		currentCursor,
+		submissionKeys: buildSubmissionKeys(state.campaigns)
+	};
 };
 
 export const actions: Actions = {

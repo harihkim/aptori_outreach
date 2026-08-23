@@ -136,7 +136,10 @@ def test_openapi_documents_campaign_contracts(migrated_test_database: str) -> No
     )
     assert "headers" not in post["responses"]["201"]
     list_responses = spec["paths"]["/campaigns"]["get"]["responses"]
-    assert "400" not in list_responses
+    assert "400" in list_responses
     assert "409" not in list_responses
+    audit = spec["paths"]["/campaigns/{campaign_id}/audit"]["get"]
+    assert audit["security"] == [{"HTTPBearer": []}]
+    assert "$ref" in audit["responses"]["200"]["content"]["application/json"]["schema"]
     assert "security" not in spec["paths"]["/health"]["get"]
     assert spec["components"]["schemas"]["ErrorResponse"]

@@ -2,18 +2,21 @@ from collections.abc import Callable
 from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Path, status
+from fastapi import APIRouter, Header, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
 
+from app.auditing.schemas import AuditEventPageResponse, AuditEventResponse
 from app.campaigns import service
 from app.campaigns.schemas import (
     CampaignCreate,
+    CampaignPageResponse,
     CampaignResponse,
     CampaignUpdate,
     ErrorResponse,
 )
 from app.deps import PrincipalDep, SessionDep, WorkspaceDep
 from app.idempotency import service as idempotency
+from app.pagination import InvalidCursor
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -62,14 +65,37 @@ def create_campaign(
     )
 
 
-@router.get("", responses=_AUTH_RESPONSES)
+@router.get(
+    "",
+    response_model=CampaignPageResponse,
+    responses={
+        **_AUTH_RESPONSES,
+        400: {"model": ErrorResponse, "description": "Invalid page cursor."},
+    },
+)
 def list_campaigns(
-    session: SessionDep, workspace: WorkspaceDep, principal: PrincipalDep
-) -> list[CampaignResponse]:
-    campaigns = _authorized(
-        lambda: service.list_campaigns(session, principal, workspace.id)
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    principal: PrincipalDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> CampaignPageResponse:
+    try:
+        campaigns, next_cursor = _authorized(
+            lambda: service.list_campaigns(
+                session,
+                principal,
+                workspace.id,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except InvalidCursor:
+        raise _invalid_cursor() from None
+    return CampaignPageResponse(
+        items=[CampaignResponse.model_validate(campaign) for campaign in campaigns],
+        next_cursor=next_cursor,
     )
-    return [CampaignResponse.model_validate(campaign) for campaign in campaigns]
 
 
 @router.get(
@@ -94,6 +120,44 @@ def get_campaign(
     except service.CampaignNotFound:
         raise _not_found() from None
     return CampaignResponse.model_validate(campaign)
+
+
+@router.get(
+    "/{campaign_id}/audit",
+    response_model=AuditEventPageResponse,
+    responses={
+        **_AUTH_RESPONSES,
+        400: {"model": ErrorResponse, "description": "Invalid page cursor."},
+        404: {"model": ErrorResponse, "description": "Campaign not found."},
+    },
+)
+def list_campaign_audit(
+    campaign_id: Annotated[UUID, Path()],
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    principal: PrincipalDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> AuditEventPageResponse:
+    try:
+        events, next_cursor = _authorized(
+            lambda: service.list_campaign_audit(
+                session,
+                principal,
+                workspace.id,
+                campaign_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except service.CampaignNotFound:
+        raise _not_found() from None
+    except InvalidCursor:
+        raise _invalid_cursor() from None
+    return AuditEventPageResponse(
+        items=[AuditEventResponse.model_validate(event) for event in events],
+        next_cursor=next_cursor,
+    )
 
 
 @router.patch(
@@ -184,6 +248,14 @@ def _forbidden() -> HTTPException:
         status.HTTP_403_FORBIDDEN,
         "workspace_forbidden",
         "The authenticated principal cannot access this workspace.",
+    )
+
+
+def _invalid_cursor() -> HTTPException:
+    return _http_error(
+        status.HTTP_400_BAD_REQUEST,
+        "page_cursor_invalid",
+        "The page cursor is invalid or belongs to another endpoint.",
     )
 
 

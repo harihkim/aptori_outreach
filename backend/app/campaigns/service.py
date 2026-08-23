@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Principal
+from app.auditing.models import AuditEvent
 from app.auditing.service import record_audit
 from app.campaigns.models import Campaign
 from app.campaigns.schemas import (
@@ -15,6 +16,7 @@ from app.campaigns.schemas import (
     CampaignUpdate,
 )
 from app.idempotency import service as idempotency
+from app.pagination import decode_cursor, encode_cursor
 
 # DRAFT -> ACTIVE -> PAUSED -> ACTIVE ; ACTIVE|PAUSED -> ARCHIVED
 LEGAL_TRANSITIONS: set[tuple[CampaignStatus, CampaignStatus]] = {
@@ -105,15 +107,63 @@ def get_campaign(
 
 
 def list_campaigns(
-    session: Session, principal: Principal, workspace_id: uuid.UUID
-) -> list[Campaign]:
+    session: Session,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[Campaign], str | None]:
     _require_workspace_access(principal, workspace_id)
-    campaigns = session.scalars(
-        select(Campaign)
-        .where(Campaign.workspace_id == workspace_id)
-        .order_by(Campaign.created_at.desc(), Campaign.id)
+    statement = select(Campaign).where(Campaign.workspace_id == workspace_id)
+    if cursor is not None:
+        statement = statement.where(
+            Campaign.creation_order < decode_cursor("campaigns", cursor)
+        )
+    campaigns = list(
+        session.scalars(
+            statement.order_by(Campaign.creation_order.desc()).limit(limit + 1)
+        )
     )
-    return list(campaigns)
+    page = campaigns[:limit]
+    next_cursor = (
+        encode_cursor("campaigns", page[-1].creation_order)
+        if len(campaigns) > limit
+        else None
+    )
+    return page, next_cursor
+
+
+def list_campaign_audit(
+    session: Session,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[AuditEvent], str | None]:
+    get_campaign(session, principal, workspace_id, campaign_id)
+    statement = select(AuditEvent).where(
+        AuditEvent.target_type == "campaign",
+        AuditEvent.target_id == campaign_id,
+    )
+    if cursor is not None:
+        statement = statement.where(
+            AuditEvent.event_order < decode_cursor("campaign-audit", cursor)
+        )
+    events = list(
+        session.scalars(
+            statement.order_by(AuditEvent.event_order.desc()).limit(limit + 1)
+        )
+    )
+    page = events[:limit]
+    next_cursor = (
+        encode_cursor("campaign-audit", page[-1].event_order)
+        if len(events) > limit
+        else None
+    )
+    return page, next_cursor
 
 
 def _get_campaign_locked(

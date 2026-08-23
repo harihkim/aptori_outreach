@@ -26,11 +26,15 @@ const campaignBody: CampaignBody = {
 	archived_at: null
 };
 
+function page(items: unknown[], nextCursor: string | null = null): unknown {
+	return { items, next_cursor: nextCursor };
+}
+
 describe('parseCampaignsResponse', () => {
 	it('maps a complete listing into camelCase campaigns', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [campaignBody]
+			body: page([campaignBody])
 		});
 
 		expect(state).toEqual({
@@ -53,6 +57,7 @@ describe('parseCampaignsResponse', () => {
 					archivedAt: null
 				}
 			],
+			nextCursor: null,
 			detail: null
 		});
 	});
@@ -60,7 +65,7 @@ describe('parseCampaignsResponse', () => {
 	it('treats an absent list field as an unexpected response', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, keywords: undefined }]
+			body: page([{ ...campaignBody, keywords: undefined }])
 		});
 
 		expect(state.campaigns).toEqual([]);
@@ -70,11 +75,11 @@ describe('parseCampaignsResponse', () => {
 	it('treats a missing workspace id or updated_at as an unexpected response', () => {
 		const noWorkspace = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, workspace_id: undefined }]
+			body: page([{ ...campaignBody, workspace_id: undefined }])
 		});
 		const noUpdated = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, updated_at: undefined }]
+			body: page([{ ...campaignBody, updated_at: undefined }])
 		});
 
 		expect(noWorkspace.campaigns).toEqual([]);
@@ -84,7 +89,7 @@ describe('parseCampaignsResponse', () => {
 	it('treats an entry with an unknown status as an unexpected response', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, status: 'zombie' }]
+			body: page([{ ...campaignBody, status: 'zombie' }])
 		});
 
 		expect(state.campaigns).toEqual([]);
@@ -94,7 +99,7 @@ describe('parseCampaignsResponse', () => {
 	it('treats a non-string list item as an unexpected response', () => {
 		const state = parseCampaignsResponse({
 			httpStatus: 200,
-			body: [{ ...campaignBody, keywords: ['API security', 5] }]
+			body: page([{ ...campaignBody, keywords: ['API security', 5] }])
 		});
 
 		expect(state.campaigns).toEqual([]);
@@ -114,8 +119,18 @@ describe('parseCampaignsResponse', () => {
 		expect(state).toEqual({
 			apiReachable: false,
 			campaigns: [],
+			nextCursor: null,
 			detail: 'Backend did not answer'
 		});
+	});
+
+	it('keeps the opaque cursor for the next page', () => {
+		const state = parseCampaignsResponse({
+			httpStatus: 200,
+			body: page([campaignBody], 'next-page')
+		});
+
+		expect(state.nextCursor).toBe('next-page');
 	});
 
 	it('translates stable backend errors on the initial listing', () => {
@@ -131,6 +146,12 @@ describe('parseCampaignsResponse', () => {
 				body: { detail: { code: 'workspace_forbidden' } }
 			}).detail
 		).toBe('The backend token cannot access this workspace.');
+		expect(
+			parseCampaignsResponse({
+				httpStatus: 400,
+				body: { detail: { code: 'page_cursor_invalid' } }
+			}).detail
+		).toBe('That campaign page link is invalid; return to the newest campaigns.');
 	});
 });
 

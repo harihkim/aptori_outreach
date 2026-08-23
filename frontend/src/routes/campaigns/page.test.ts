@@ -40,7 +40,9 @@ function campaign(overrides: Partial<Campaign>): Campaign {
 function pageData(
 	campaigns: Campaign[] = [],
 	detail: string | null = null,
-	apiReachable = true
+	apiReachable = true,
+	nextCursor: string | null = null,
+	currentCursor: string | null = null
 ) {
 	const submissionKeys: Record<string, string> = {
 		[CREATE_SUBMISSION_ID]: 'key:create'
@@ -54,7 +56,7 @@ function pageData(
 				`key:transition:${item.id}:${action.status}`;
 		}
 	}
-	return { apiReachable, detail, campaigns, submissionKeys };
+	return { apiReachable, detail, campaigns, nextCursor, currentCursor, submissionKeys };
 }
 
 describe('campaigns/+page.svelte', () => {
@@ -211,6 +213,19 @@ describe('campaigns/+page.svelte', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
 		expect(invalidate).toHaveBeenCalledWith('app:campaigns');
+	});
+
+	it('offers bounded navigation across campaign pages', () => {
+		render(Page, { data: pageData([], null, true, 'next-cursor', 'current-cursor') });
+
+		expect(screen.getByRole('link', { name: 'Newest campaigns' })).toHaveAttribute(
+			'href',
+			'/campaigns'
+		);
+		expect(screen.getByRole('link', { name: 'Older campaigns' })).toHaveAttribute(
+			'href',
+			'/campaigns?cursor=next-cursor'
+		);
 	});
 
 	it('gives every logical form its own submission key', () => {

@@ -162,17 +162,47 @@ def test_get_unknown_campaign_returns_stable_404(client: TestClient) -> None:
     assert response.json()["detail"]["code"] == "campaign_not_found"
 
 
-def test_list_campaigns_orders_newest_first(client: TestClient) -> None:
+def test_list_campaigns_orders_newest_first_when_timestamps_tie(
+    client: TestClient, migrated_test_database: str
+) -> None:
     first = created_campaign(client, name="first campaign")
     second = created_campaign(client, name="second campaign")
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(
+            text("UPDATE campaigns SET created_at = '2026-08-23T00:00:00Z'")
+        )
 
     response = client.get("/campaigns")
 
     assert response.status_code == 200
-    assert [campaign["name"] for campaign in response.json()] == [
+    assert [campaign["name"] for campaign in response.json()["items"]] == [
         "second campaign",
         "first campaign",
     ]
+    assert response.json()["next_cursor"] is None
+
+
+def test_list_campaigns_pages_without_duplicates(client: TestClient) -> None:
+    first = created_campaign(client, name="first campaign")
+    second = created_campaign(client, name="second campaign")
+    third = created_campaign(client, name="third campaign")
+
+    newest = client.get("/campaigns", params={"limit": 2})
+    older = client.get(
+        "/campaigns",
+        params={"limit": 2, "cursor": newest.json()["next_cursor"]},
+    )
+
+    assert [item["id"] for item in newest.json()["items"]] == [third["id"], second["id"]]
+    assert [item["id"] for item in older.json()["items"]] == [first["id"]]
+    assert older.json()["next_cursor"] is None
+
+
+def test_list_campaigns_rejects_an_invalid_cursor(client: TestClient) -> None:
+    response = client.get("/campaigns", params={"cursor": "not-a-cursor"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "page_cursor_invalid"
 
 
 def test_foreign_workspace_campaigns_are_invisible(
@@ -198,7 +228,7 @@ def test_foreign_workspace_campaigns_are_invisible(
         )
 
     listing = client.get("/campaigns")
-    assert [campaign["name"] for campaign in listing.json()] == []
+    assert [campaign["name"] for campaign in listing.json()["items"]] == []
     assert client.get(f"/campaigns/{foreign_campaign}").status_code == 404
     assert (
         client.patch(f"/campaigns/{foreign_campaign}", headers=write_headers(), json={"name": "x"}).status_code
@@ -215,7 +245,11 @@ def test_campaign_service_rejects_a_principal_without_workspace_access(
         with Session(engine) as session:
             with pytest.raises(campaigns_service.WorkspaceAccessDenied):
                 campaigns_service.list_campaigns(
-                    session, principal, DEFAULT_WORKSPACE_ID
+                    session,
+                    principal,
+                    DEFAULT_WORKSPACE_ID,
+                    limit=50,
+                    cursor=None,
                 )
     finally:
         engine.dispose()
@@ -366,7 +400,7 @@ def test_writes_reject_overlong_idempotency_keys(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "idempotency_key_too_long"
-    assert client.get("/campaigns").json() == []
+    assert client.get("/campaigns").json()["items"] == []
 
 
 def test_create_replay_returns_the_original_campaign_without_duplicating(
@@ -380,7 +414,7 @@ def test_create_replay_returns_the_original_campaign_without_duplicating(
     assert second.status_code == 201
     assert second.json() == first.json()
     listing = client.get("/campaigns").json()
-    assert [campaign["id"] for campaign in listing] == [first.json()["id"]]
+    assert [campaign["id"] for campaign in listing["items"]] == [first.json()["id"]]
     assert [
         event.action for event in audit_events(migrated_test_database, first.json()["id"])
     ] == ["campaign.created"]
@@ -424,6 +458,55 @@ def test_transition_replay_returns_the_original_response_without_duplicate_audit
         if event.action == "campaign.transitioned"
     ]
     assert len(transitions) == 1
+
+
+def test_campaign_audit_is_authorized_and_cursor_paginated(client: TestClient) -> None:
+    created = created_campaign(client)
+    campaign_id = created["id"]
+    assert client.patch(
+        f"/campaigns/{campaign_id}",
+        headers=write_headers(),
+        json={"name": "Renamed"},
+    ).status_code == 200
+    assert client.patch(
+        f"/campaigns/{campaign_id}",
+        headers=write_headers(),
+        json={"status": "active"},
+    ).status_code == 200
+
+    newest = client.get(f"/campaigns/{campaign_id}/audit", params={"limit": 2})
+    older = client.get(
+        f"/campaigns/{campaign_id}/audit",
+        params={"limit": 2, "cursor": newest.json()["next_cursor"]},
+    )
+
+    assert newest.status_code == 200
+    assert [event["action"] for event in newest.json()["items"]] == [
+        "campaign.transitioned",
+        "campaign.updated",
+    ]
+    assert [event["action"] for event in older.json()["items"]] == [
+        "campaign.created"
+    ]
+    assert older.json()["next_cursor"] is None
+    assert all(event["actor"] == "operator" for event in newest.json()["items"])
+
+
+def test_campaign_audit_hides_unknown_campaigns_and_rejects_wrong_cursor(
+    client: TestClient,
+) -> None:
+    unknown = client.get(f"/campaigns/{uuid.uuid4()}/audit")
+    created = created_campaign(client)
+    campaign_page = client.get("/campaigns", params={"limit": 1}).json()
+    wrong_cursor = client.get(
+        f"/campaigns/{created['id']}/audit",
+        params={"cursor": campaign_page["next_cursor"] or "not-a-cursor"},
+    )
+
+    assert unknown.status_code == 404
+    assert unknown.json()["detail"]["code"] == "campaign_not_found"
+    assert wrong_cursor.status_code == 400
+    assert wrong_cursor.json()["detail"]["code"] == "page_cursor_invalid"
 
 
 def test_transition_error_replay_preserves_the_original_result(
@@ -520,6 +603,7 @@ def test_concurrent_transitions_never_produce_a_half_archived_campaign(
     engine = create_engine(migrated_test_database)
     lock_connection = engine.connect()
     lock_transaction = lock_connection.begin()
+    lock_holder_pid = lock_connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
     pause_thread = threading.Thread(target=api_pause)
     observed_lock_wait = False
     try:
@@ -539,14 +623,13 @@ def test_concurrent_transitions_never_produce_a_half_archived_campaign(
                     observer.execute(
                         text(
                             "SELECT EXISTS ("
-                            " SELECT 1 FROM pg_stat_activity"
+                            " SELECT 1 FROM pg_stat_activity AS activity"
                             " WHERE datname = current_database()"
                             " AND pid <> pg_backend_pid()"
-                            " AND wait_event_type = 'Lock'"
-                            " AND query ILIKE '%campaigns%'"
-                            " AND query ILIKE '%FOR UPDATE%'"
+                            " AND :holder_pid = ANY(pg_blocking_pids(activity.pid))"
                             ")"
-                        )
+                        ),
+                        {"holder_pid": lock_holder_pid},
                     ).scalar_one()
                 )
                 if observed_lock_wait:
@@ -619,4 +702,6 @@ def test_crash_between_mutation_and_commit_rolls_back_and_retries_cleanly(
     retried = client.post("/campaigns", json=create_payload(), headers=write_headers(key))
 
     assert retried.status_code == 201
-    assert [c["id"] for c in client.get("/campaigns").json()] == [retried.json()["id"]]
+    assert [c["id"] for c in client.get("/campaigns").json()["items"]] == [
+        retried.json()["id"]
+    ]

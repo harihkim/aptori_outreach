@@ -282,4 +282,23 @@
 			{/if}
 		{/each}
 	</section>
+
+	{#if data.currentCursor || data.nextCursor}
+		<nav class="flex items-center justify-between gap-3" aria-label="Campaign pages">
+			{#if data.currentCursor}
+				<Button href="/campaigns" variant="outline" size="sm">Newest campaigns</Button>
+			{:else}
+				<span></span>
+			{/if}
+			{#if data.nextCursor}
+				<Button
+					href={`/campaigns?cursor=${encodeURIComponent(data.nextCursor)}`}
+					variant="outline"
+					size="sm"
+				>
+					Older campaigns
+				</Button>
+			{/if}
+		</nav>
+	{/if}
 </div>

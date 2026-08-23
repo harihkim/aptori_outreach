@@ -59,12 +59,37 @@ describe('campaign page load', () => {
 			})
 		);
 
-		const result = await load({ fetch: requestFetch, depends: vi.fn() } as never);
+		const result = await load({
+			fetch: requestFetch,
+			depends: vi.fn(),
+			url: new URL('http://app.test/campaigns')
+		} as never);
 		if (!result) {
 			throw new Error('campaign page load returned no data');
 		}
 
 		expect(result.detail).toBe('The backend has no API token configured.');
 		expect(result.campaigns).toEqual([]);
+	});
+
+	it('passes an opaque cursor through to the bounded backend listing', async () => {
+		const requestFetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ items: [], next_cursor: null }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			})
+		);
+
+		const result = await load({
+			fetch: requestFetch,
+			depends: vi.fn(),
+			url: new URL('http://app.test/campaigns?cursor=older-page')
+		} as never);
+
+		expect(result && result.currentCursor).toBe('older-page');
+		expect(requestFetch).toHaveBeenCalledWith(
+			'http://api.test/campaigns?limit=50&cursor=older-page',
+			expect.any(Object)
+		);
 	});
 });
