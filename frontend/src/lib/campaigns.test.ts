@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
+import lifecycleContractJson from '../../../contracts/campaign-lifecycle.json';
+
 import {
+	CAMPAIGN_POSTURES,
+	CAMPAIGN_STATUSES,
+	DEFAULT_PROMOTION_POSTURE,
 	explainCampaignError,
 	nextActions,
 	parseCampaignsResponse,
 	parseListLines,
 	type CampaignBody
 } from '$lib/campaigns';
+
+type LifecycleContract = {
+	statuses: string[];
+	promotionPostures: string[];
+	defaultPromotionPosture: string;
+	transitions: Record<string, string[]>;
+};
+
+const lifecycleContract = lifecycleContractJson as LifecycleContract;
 
 const campaignBody: CampaignBody = {
 	id: '6a9a2f0e-1111-4bbb-8ccc-000000000001',
@@ -156,6 +170,20 @@ describe('parseCampaignsResponse', () => {
 });
 
 describe('nextActions', () => {
+	it('matches the shared cross-runtime lifecycle contract', () => {
+		expect(CAMPAIGN_STATUSES).toEqual(lifecycleContract.statuses);
+		expect(CAMPAIGN_POSTURES).toEqual(lifecycleContract.promotionPostures);
+		expect(DEFAULT_PROMOTION_POSTURE).toBe(lifecycleContract.defaultPromotionPosture);
+		expect(
+			Object.fromEntries(
+				CAMPAIGN_STATUSES.map((status) => [
+					status,
+					nextActions(status).map((action) => action.status)
+				])
+			)
+		).toEqual(lifecycleContract.transitions);
+	});
+
 	it('offers only legal transitions for each status', () => {
 		expect(nextActions('draft')).toEqual([{ status: 'active', label: 'Activate' }]);
 		expect(nextActions('active')).toEqual([

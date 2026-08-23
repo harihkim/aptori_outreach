@@ -22,7 +22,7 @@ Single-context, spec-first repo: domain language and architecture decisions live
 └── social_intelligence_markdown/
     ├── CONTEXT.md                        ← glossary (single context)
     └── docs/
-        ├── adr/                          ← ADR-001 … ADR-012
+        ├── adr/                          ← ADR-001 … ADR-015
         └── …                             ← product, architecture, research, roadmap
 ```
 

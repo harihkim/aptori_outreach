@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "statuses": ["draft", "active", "paused", "archived"],
+  "promotionPostures": ["expertise_first", "balanced", "high_intent_only"],
+  "defaultPromotionPosture": "expertise_first",
+  "transitions": {
+    "draft": ["active"],
+    "active": ["paused", "archived"],
+    "paused": ["active", "archived"],
+    "archived": []
+  }
+}

@@ -1,5 +1,12 @@
-export type CampaignStatus = 'draft' | 'active' | 'paused' | 'archived';
-export type PromotionPosture = 'expertise_first' | 'balanced' | 'high_intent_only';
+export const CAMPAIGN_STATUSES = ['draft', 'active', 'paused', 'archived'] as const;
+export const CAMPAIGN_POSTURES = [
+	'expertise_first',
+	'balanced',
+	'high_intent_only'
+] as const;
+
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+export type PromotionPosture = (typeof CAMPAIGN_POSTURES)[number];
 
 export const DEFAULT_PROMOTION_POSTURE: PromotionPosture = 'expertise_first';
 
@@ -61,15 +68,12 @@ export function transitionSubmissionId(
 	return `transition:${campaignId}:${status}`;
 }
 
-const STATUSES: CampaignStatus[] = ['draft', 'active', 'paused', 'archived'];
-const POSTURES: PromotionPosture[] = ['expertise_first', 'balanced', 'high_intent_only'];
-
 function isCampaignStatus(value: string): value is CampaignStatus {
-	return (STATUSES as string[]).includes(value);
+	return (CAMPAIGN_STATUSES as readonly string[]).includes(value);
 }
 
 function isPromotionPosture(value: string): value is PromotionPosture {
-	return (POSTURES as string[]).includes(value);
+	return (CAMPAIGN_POSTURES as readonly string[]).includes(value);
 }
 
 const LIST_FIELDS = ['keywords', 'subreddits', 'competitors', 'approved_claims', 'prohibited_claims'] as const;

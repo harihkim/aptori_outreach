@@ -8,4 +8,4 @@ The previous DOCX files are stakeholder-friendly exports; this Markdown tree is 
 
 ## Current baseline
 
-Documentation revision v0.3 incorporates the reviewed Pydantic AI, Crawlee/PRAW/Async PRAW, Agent Reach, Gemini exploration, and third-party scraping-architecture findings. Material under the repository-level `new_docs/` directory is working research, not an alternate source of truth; accepted conclusions have been normalized into this package without importing its conflicting ADR identifier or superseding the canonical observation model.
+Documentation revision v0.3 incorporates the reviewed Pydantic AI, Crawlee/PRAW/Async PRAW, Agent Reach, Gemini exploration, and third-party scraping-architecture findings. Accepted conclusions are normalized into this package without importing conflicting ADR identifiers or superseding the canonical observation model.

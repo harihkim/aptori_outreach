@@ -8,12 +8,13 @@ Workspace for a Reddit-first **Social Intelligence & Engagement Copilot**: disco
 
 | Path | Contents |
 |---|---|
-| `social_intelligence_markdown/` | Canonical, version-controlled specification: product spec, architecture, 12 ADRs, API/MCP contracts, retrieval research, roadmap. This is the source of truth. |
+| `social_intelligence_markdown/` | Canonical, version-controlled specification: product spec, architecture, 15 ADRs, API/MCP contracts, retrieval research, roadmap. This is the source of truth. |
+| `contracts/` | Language-neutral executable contracts checked by both backend and frontend suites. |
 | `packages/obscura-retrieval/` | ADR-012 retrieval adapters (`ObscuraDuckDuckGoLiteDiscoverySource`, `ObscuraRedditThreadFetcher`) with pinned, hash-verified runtime configuration. |
 | `retrieval-eval/prototype-smoke/` | Frozen smoke-gate protocol, known-thread corpus (14 verified fixtures), provider configs, daily canary runner. |
 | `experiments/` | Retrieval spikes, including the in-origin thread extractor and its recorded evidence runs. |
-| `backend/` | FastAPI application core over PostgreSQL canonical state with Alembic migrations (V1 done; Campaign domain lands in V3). |
-| `frontend/` | SvelteKit 2 + Svelte 5 with shadcn-svelte, showing live backend connectivity (V2 done; Campaign screens land in V3). |
+| `backend/` | FastAPI application core over PostgreSQL canonical state: authenticated, idempotent Campaign writes plus paginated Campaign and audit reads. |
+| `frontend/` | SvelteKit 2 + Svelte 5 with shadcn-svelte: live health diagnostics and Campaign create/edit/lifecycle screens. |
 
 ## Quick start (WSL)
 
