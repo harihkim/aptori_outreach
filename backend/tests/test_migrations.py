@@ -1,13 +1,16 @@
 """Migration behavior: the domain baseline (Workspace, Campaign, AuditEvent) round-trips."""
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.engine import Connection
 
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0005_stable_page_order"
+HEAD_REVISION = "0006_discovery_runs"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -35,6 +38,8 @@ def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database:
             "campaigns",
             "audit_events",
             "idempotency_events",
+            "discovery_runs",
+            "retrieval_observations",
         }
         campaign_columns = {column["name"] for column in inspect(connection).get_columns("campaigns")}
         audit_columns = {column["name"] for column in inspect(connection).get_columns("audit_events")}
@@ -140,3 +145,112 @@ def test_stable_order_migration_backfills_existing_rows(
         assert event_order > 0
         connection.execute(text("DELETE FROM audit_events WHERE id = :id"), {"id": event_id})
         connection.execute(text("DELETE FROM campaigns WHERE id = :id"), {"id": campaign_id})
+
+
+def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
+    """Insert one campaign, discovery run, and retrieval observation; return their ids."""
+    campaign_id = "00000000-0000-0000-0000-000000000007"
+    run_id = "00000000-0000-0000-0000-000000000008"
+    observation_id = "00000000-0000-0000-0000-000000000009"
+    connection.execute(
+        text(
+            "INSERT INTO campaigns "
+            "(id, workspace_id, name, promotion_posture) "
+            "VALUES (:id, :workspace, 'discovery-immutability', 'expertise_first')"
+        ),
+        {"id": campaign_id, "workspace": str(DEFAULT_WORKSPACE_ID)},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO discovery_runs "
+            "(id, workspace_id, campaign_id, status, method_plan, correlation_id) "
+            "VALUES (:id, :workspace, :campaign, 'succeeded', '{}'::jsonb, 'corr-immutable')"
+        ),
+        {
+            "id": run_id,
+            "workspace": str(DEFAULT_WORKSPACE_ID),
+            "campaign": campaign_id,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO retrieval_observations "
+            "(id, discovery_run_id, workspace_id, query_id, schema_version, capability, "
+            "provider_variant, config_sha256, observation_id, status, evidence_directory, "
+            "correlation_id) "
+            "VALUES (:id, :run, :workspace, 'q-1', 1, 'discovery', 'test-variant', :config, "
+            "'obs-1', 'success', '/tmp/evidence/obs-1', 'corr-immutable')"
+        ),
+        {
+            "id": observation_id,
+            "run": run_id,
+            "workspace": str(DEFAULT_WORKSPACE_ID),
+            "config": "a" * 64,
+        },
+    )
+    return run_id, observation_id
+
+
+def test_retrieval_observations_reject_update_and_delete_at_sql_level(
+    migrated_test_database: str,
+) -> None:
+    engine = create_engine(migrated_test_database)
+    with engine.begin() as connection:
+        _, observation_id = _seed_run_and_observation(connection)
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE retrieval_observations SET status = 'failed' WHERE id = :id"),
+                {"id": observation_id},
+            )
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM retrieval_observations WHERE id = :id"),
+                {"id": observation_id},
+            )
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT status FROM retrieval_observations WHERE id = :id"),
+            {"id": observation_id},
+        ).one()
+
+    assert row.status == "success"
+
+
+def test_discovery_migration_round_trips_through_previous_revision(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+
+    command.downgrade(alembic_cfg, "0005_stable_page_order")
+
+    with create_engine(migrated_test_database).connect() as connection:
+        tables = set(inspect(connection).get_table_names())
+        assert "discovery_runs" not in tables
+        assert "retrieval_observations" not in tables
+        triggers_left = connection.execute(
+            text(
+                "SELECT count(*) FROM pg_trigger "
+                "WHERE tgname LIKE '%retrieval_observation%'"
+            )
+        ).scalar_one()
+        functions_left = connection.execute(
+            text(
+                "SELECT count(*) FROM pg_proc "
+                "WHERE proname = 'suppress_retrieval_observation_mutation'"
+            )
+        ).scalar_one()
+        assert triggers_left == 0
+        assert functions_left == 0
+
+    command.upgrade(alembic_cfg, "head")
+
+    from alembic.runtime.migration import MigrationContext
+
+    with create_engine(migrated_test_database).connect() as connection:
+        context = MigrationContext.configure(connection)
+        assert context.get_current_revision() == HEAD_REVISION
+        tables = set(inspect(connection).get_table_names())
+        assert {"discovery_runs", "retrieval_observations"} <= tables
