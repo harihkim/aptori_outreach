@@ -41,6 +41,7 @@ preparation worker
 
 - Correlation IDs span request, application command, worker job, Retrieval Observation, Model Run, browser session, and external provider request.
 - Retrieval telemetry includes provider/method/version, access-identity class, egress environment, status/failure class, completeness, latency, retries, rate/reset headers, bytes/browser time/model tokens, and cost.
+- Currency cost may be unpriced when no authoritative rate card exists; unpriced is not free or zero, and measured retrieval usage remains reportable.
 - Counters distinguish domain jobs/queries, provider attempts, top-level API calls or navigations, browser/network subrequests, returned/normalized/deduplicated items, and provider billable units.
 - Model telemetry includes task/prompt/schema versions, requested/actual provider/model/settings, transport/output/tool retries, usage, estimated cost, and time to first/final output.
 - Approval telemetry records the human decision, artifact digest, expiry/revocation/consumption, and rejected override/replay attempts.
