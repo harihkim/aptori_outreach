@@ -524,3 +524,38 @@ def test_discovery_run_created_audit_carries_correlation_id(
     assert len(created) == 1
     assert created[0].correlation_id == body["correlation_id"]
     del campaign_id
+
+
+def test_api_distinguishes_unpriced_from_zero(
+    api: TestClient, fake_enqueue: FakeEnqueue, discovery_database_url: str
+) -> None:
+    """cost_status='unpriced' with cost_usd=null passes through untouched."""
+    body, _campaign_id = started_run(api, fake_enqueue)
+    rolled_up_metrics = (
+        '{"counts": {"success": 1}, "total_elapsed_ms": 1250, '
+        '"cost_usd": null, "cost_status": "unpriced", '
+        '"usage": {"request_count": 14, "bytes_transferred": null}}'
+    )
+    update_engine = create_engine(discovery_database_url)
+    try:
+        with update_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE discovery_runs SET status = 'succeeded', "
+                    "metrics = CAST(:m AS jsonb) WHERE id = :id"
+                ),
+                {"m": rolled_up_metrics, "id": uuid.UUID(body["id"])},
+            )
+    finally:
+        update_engine.dispose()
+
+    detail = api.get(f"/discovery-runs/{body['id']}")
+    assert detail.status_code == 200
+    metrics = detail.json()["metrics"]
+
+    # Null means "no pricing exists"; it must never collapse into 0.
+    assert "cost_usd" in metrics
+    assert metrics["cost_usd"] is None
+    assert metrics["cost_status"] == "unpriced"
+    assert metrics["usage"]["request_count"] == 14
+    assert metrics["usage"]["bytes_transferred"] is None

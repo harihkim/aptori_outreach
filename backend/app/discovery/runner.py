@@ -8,11 +8,16 @@ never leave a database transaction open across a subprocess spawn:
    rows, moves queued->running with its audit event, replays-guards the
    observation pair, and commits.
 2. SPAWN — the retrieval CLI runs with NO open transaction or connection.
-   Classification happens here too: every outcome becomes an attempt outcome,
-   never an exception.
+   Query inputs are staged in the Python-owned scratch root (the evidence
+   output root belongs to the CLI); classification happens here too: every
+   outcome becomes an attempt outcome, never an exception.
 3. SETTLE — one final transaction re-locks the run, authoritatively
    replay-guards the insert, rolls the run up counting only planned queries,
    and transitions it to a terminal status exactly once.
+
+Spawn configuration comes exclusively from settings: there is deliberately
+no override channel on this function, so a queue caller can never substitute
+binaries or paths.
 """
 
 import json
@@ -31,7 +36,12 @@ from app.auditing.service import record_audit
 from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.discovery import cli
-from app.discovery.models import DiscoveryRun, RetrievalObservation
+from app.discovery.models import (
+    RUN_COST_STATUSES,
+    RUN_COST_UNPRICED,
+    DiscoveryRun,
+    RetrievalObservation,
+)
 from app.discovery.observations import (
     OBSERVATION_SCHEMA_VERSION,
     ObservationDocument,
@@ -60,12 +70,13 @@ EXPECTED_CAPABILITY = "discovery"
 
 @dataclass(frozen=True)
 class _AttemptConfig:
-    """Resolved spawn parameters; tests inject every value."""
+    """Spawn parameters resolved once per attempt from settings alone."""
 
     node_bin: str
     cli_path: str
     config_path: str
     evidence_root: Path
+    input_root: Path
     timeout_seconds: float
 
 
@@ -88,20 +99,15 @@ class _AttemptOutcome:
     failure_reason: str | None = None
 
 
-def _resolve_config(overrides: dict[str, object] | None) -> _AttemptConfig:
+def _resolve_config() -> _AttemptConfig:
     settings = get_settings()
-    given = overrides or {}
-
-    def pick(key: str, fallback: object) -> str:
-        value = given.get(key, fallback)
-        return str(value)
-
     return _AttemptConfig(
-        node_bin=pick("node_bin", settings.retrieval_node_bin),
-        cli_path=pick("cli_path", settings.retrieval_cli_path),
-        config_path=pick("provider_config_path", settings.discovery_provider_config_path),
-        evidence_root=Path(pick("evidence_root", settings.retrieval_evidence_root)),
-        timeout_seconds=float(pick("timeout_seconds", settings.retrieval_attempt_timeout_seconds)),
+        node_bin=settings.retrieval_node_bin,
+        cli_path=str(settings.retrieval_cli_path),
+        config_path=str(settings.discovery_provider_config_path),
+        evidence_root=Path(settings.retrieval_evidence_root),
+        input_root=Path(settings.retrieval_input_scratch_root),
+        timeout_seconds=float(settings.retrieval_attempt_timeout_seconds),
     )
 
 
@@ -133,39 +139,90 @@ def _plan_queries(method_plan: dict[str, object]) -> list[dict[str, Any]]:
     return [entry for entry in raw if isinstance(entry, dict)]
 
 
-def _document_observation(
-    run: DiscoveryRun, query_id: str, correlation_id: str, doc: ObservationDocument
+def _new_observation(
+    run: DiscoveryRun,
+    query_id: str,
+    correlation_id: str,
+    *,
+    schema_version: int,
+    provider_variant: str,
+    config_sha256: str,
+    observation_id: str,
+    status: str,
+    evidence_directory: str,
+    failure_class: str | None = None,
+    failure_reason: str | None = None,
+    source_url: str | None = None,
+    final_url: str | None = None,
+    candidate_count: int = 0,
+    candidates: list[dict[str, Any]] | None = None,
+    normalized_sha256: str | None = None,
+    elapsed_ms: int | None = None,
+    started_at: datetime | None = None,
+    completed_at: datetime | None = None,
+    runtime: dict[str, Any] | None = None,
+    network: dict[str, Any] | None = None,
+    raw_artifact: dict[str, Any] | None = None,
 ) -> RetrievalObservation:
-    """Map a validated observation document onto an append-only row."""
+    """Single construction site for append-only observation rows."""
     return RetrievalObservation(
         discovery_run_id=run.id,
         workspace_id=run.workspace_id,
         query_id=query_id,
+        schema_version=schema_version,
+        capability=EXPECTED_CAPABILITY,
+        provider_variant=provider_variant,
+        config_sha256=config_sha256,
+        observation_id=observation_id,
+        status=status,
+        failure_class=failure_class,
+        failure_reason=(
+            redact_sensitive_text(failure_reason) if failure_reason else None
+        ),
+        source_url=source_url,
+        final_url=final_url,
+        external_source_id=None,
+        candidate_count=candidate_count,
+        candidates=candidates or [],
+        normalized_sha256=normalized_sha256,
+        normalized_content_sha256=None,
+        elapsed_ms=elapsed_ms,
+        started_at=started_at,
+        completed_at=completed_at,
+        runtime=runtime,
+        network=network,
+        raw_artifact=raw_artifact,
+        evidence_directory=evidence_directory,
+        correlation_id=correlation_id,
+    )
+
+
+def _document_observation(
+    run: DiscoveryRun, query_id: str, correlation_id: str, doc: ObservationDocument
+) -> RetrievalObservation:
+    """Map a validated observation document onto an append-only row."""
+    return _new_observation(
+        run,
+        query_id,
+        correlation_id,
         schema_version=doc.schema_version,
-        capability="discovery",
         provider_variant=doc.provider_variant,
         config_sha256=doc.config_sha256,
         observation_id=doc.observation_id,
         status=doc.status,
-        failure_class=None,
-        failure_reason=(
-            redact_sensitive_text(doc.failure_reason) if doc.failure_reason else None
-        ),
+        evidence_directory=doc.evidence_directory,
+        failure_reason=doc.failure_reason,
         source_url=doc.source_url,
         final_url=doc.final_url,
-        external_source_id=None,
         candidate_count=doc.candidate_count or 0,
         candidates=doc.candidates or [],
         normalized_sha256=doc.normalized_sha256,
-        normalized_content_sha256=None,
         elapsed_ms=doc.elapsed_ms,
         started_at=_parse_iso(doc.started_at),
         completed_at=_parse_iso(doc.completed_at),
         runtime=doc.runtime,
         network=doc.network,
         raw_artifact=doc.raw_artifact,
-        evidence_directory=doc.evidence_directory,
-        correlation_id=correlation_id,
     )
 
 
@@ -180,22 +237,18 @@ def _unclassified_observation(
 ) -> RetrievalObservation:
     """Build the terminal row used when no native document can be trusted."""
     plan = run.method_plan
-    return RetrievalObservation(
-        discovery_run_id=run.id,
-        workspace_id=run.workspace_id,
-        query_id=query_id,
+    return _new_observation(
+        run,
+        query_id,
+        correlation_id,
         schema_version=OBSERVATION_SCHEMA_VERSION,
-        capability="discovery",
         provider_variant=str(plan.get("provider_variant") or "unknown"),
         config_sha256=str(plan.get("config_sha256") or "0" * 64),
         observation_id=f"{run.id}:{query_id}:unclassified",
         status="failed",
-        failure_class=failure_class,
-        failure_reason=redact_sensitive_text(failure_reason),
-        candidate_count=0,
-        candidates=[],
         evidence_directory=str(output_root),
-        correlation_id=correlation_id,
+        failure_class=failure_class,
+        failure_reason=failure_reason,
     )
 
 
@@ -223,23 +276,38 @@ def _classify_result(
 ) -> _AttemptOutcome:
     """Turn a finished CLI attempt into a persisted outcome; raises nothing."""
     if result.timed_out:
+        # The adapter already attempted deterministic disk recovery before
+        # reporting a timeout; reaching here means nothing valid was written.
         return _AttemptOutcome(
             evidence_directory=str(output_root),
             failure_class="transport_timeout",
             failure_reason=(
-                f"retrieval attempt exceeded {timeout_seconds:g}s and was killed"
+                f"retrieval attempt exceeded {timeout_seconds:g}s and was killed "
+                "without recoverable disk evidence"
             ),
         )
 
-    if result.evidence_unreadable:
-        # The authoritative disk document exists but cannot be read; the
-        # stdout projection must never stand in for it.
+    if result.evidence_source == "disk_unreadable":
+        # The authoritative disk document exists but cannot be read; stdout
+        # projections must never stand in for it.
         return _AttemptOutcome(
             evidence_directory=str(output_root),
             failure_class="evidence_unreadable",
             failure_reason=(
                 "observation.json could not be read from the evidence "
                 f"directory (stderr tail: {result.stderr_tail!r})"
+            ),
+        )
+
+    if result.evidence_source == "no_evidence_pointer":
+        # Stdout carried no evidenceDirectory, so there is nothing on disk
+        # to trust either; classify explicitly instead of guessing.
+        return _AttemptOutcome(
+            evidence_directory=str(output_root),
+            failure_class="evidence_unlocated",
+            failure_reason=(
+                "stdout projection carried no evidenceDirectory pointer; "
+                "disk is the only authoritative observation source"
             ),
         )
 
@@ -295,6 +363,17 @@ def _classify_result(
     )
 
 
+def _network_request_count(row: RetrievalObservation) -> int | None:
+    """Measured request counter retained by the CLI's network metadata."""
+    network = row.network
+    if not isinstance(network, dict):
+        return None
+    value = network.get("requests")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _roll_up_run(
     session: Session, run: DiscoveryRun, planned_ids: tuple[str, ...], correlation_id: str
 ) -> None:
@@ -302,7 +381,10 @@ def _roll_up_run(
 
     Only observations whose query_id appears in method_plan['queries'] count
     toward completion, and an already-terminal run is never transitioned
-    again.
+    again. Currency-cost state is always explicit: the backend does not
+    price retrieval, so cost_status stays 'unpriced' with cost_usd null;
+    measured usage sums cover only dimensions the tooling actually measured
+    and stay null otherwise — never zero.
     """
     rows = list(
         session.scalars(
@@ -328,12 +410,22 @@ def _roll_up_run(
     else:
         final_status = "partial"
 
+    measured_requests = [
+        count for count in (_network_request_count(row) for row in rows) if count is not None
+    ]
+    assert RUN_COST_UNPRICED in RUN_COST_STATUSES
+
     run.completed_at = _now()
     run.status = final_status
     run.metrics = {
         "counts": dict(sorted(Counter(statuses).items())),
         "total_elapsed_ms": sum(row.elapsed_ms or 0 for row in rows),
         "cost_usd": None,
+        "cost_status": RUN_COST_UNPRICED,
+        "usage": {
+            "request_count": sum(measured_requests) if measured_requests else None,
+            "bytes_transferred": None,
+        },
     }
     record_audit(
         session,
@@ -352,8 +444,6 @@ def _claim_run(
     run_id: uuid.UUID,
     correlation_id: str,
     query_id: str,
-    *,
-    overrides_refused: bool,
 ) -> tuple[str, _Claim | None]:
     """Phase 1: short claim transaction. Returns a marker plus plan snapshot.
 
@@ -412,11 +502,6 @@ def _claim_run(
             violation_reason = (
                 f"query id {query_id!r} does not match ^[A-Za-z0-9_-]{{1,64}}$"
             )
-        elif overrides_refused:
-            violation_reason = (
-                "spawn overrides were provided while allow_overrides is False; "
-                "untrusted spawn inputs are refused, never silently ignored"
-            )
         elif entry is None:
             violation_reason = (
                 f"query {query_id!r} is not present in the run's method plan"
@@ -438,22 +523,24 @@ def _claim_run(
             _roll_up_run(session, run, planned_ids, correlation_id)
             return run.status, None
 
-        # The elif chain above records a violation whenever the id is absent
-        # from the plan, so a claimed invocation always carries an entry.
+        # The refusal chain above records a violation whenever the id is
+        # absent from the plan, so a claimed invocation always carries one.
         assert entry is not None
         return "claimed", _Claim(run_id=run_id, planned_ids=planned_ids, entry=entry)
 
 
-async def _spawn_attempt(
-    query_id: str, claim: _Claim, config: _AttemptConfig
-) -> _AttemptOutcome:
-    """Phase 2: spawn the CLI — no DB tx is open, kwargs are already vetted."""
-    output_root = config.evidence_root / str(claim.run_id)
+async def _spawn_attempt(query_id: str, claim: _Claim, config: _AttemptConfig) -> _AttemptOutcome:
+    """Phase 2: spawn the CLI — no DB tx is open, kwargs are already vetted.
 
-    input_path = output_root / f"input-{query_id}.json"
-    output_root.mkdir(parents=True, exist_ok=True)
+    The query input document is staged in the Python-owned scratch root; the
+    evidence output root is owned by the CLI and only ever read back.
+    """
+    input_dir = config.input_root / str(claim.run_id)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / f"input-{query_id}.json"
     input_path.write_text(json.dumps({"queries": [claim.entry]}))
 
+    output_root = config.evidence_root / str(claim.run_id)
     result = await cli.run_retrieval_cli(
         "discover",
         node_bin=config.node_bin,
@@ -510,15 +597,12 @@ async def run_discovery_query(
     run_id: str,
     correlation_id: str,
     query_id: str,
-    overrides: dict[str, object] | None = None,
-    allow_overrides: bool = False,
 ) -> str:
     """Execute one query of one discovery run; returns the run's status.
 
-    Spawn overrides are honored only when the caller explicitly passes
-    allow_overrides=True (tests do; the registered worker function does not).
-    Overrides handed to a non-trusting invocation are recorded as a
-    contract_violation observation rather than silently ignored.
+    There is intentionally no override channel: spawn binaries, paths, and
+    timeouts come from settings alone, so what the worker runs is exactly
+    what the deployment configured.
     """
     del ctx  # arq passes its worker context; the runner does not need it.
     settings = get_settings()
@@ -527,19 +611,11 @@ async def run_discovery_query(
         connect_timeout_seconds=settings.database_connect_timeout_seconds,
     )
     try:
-        overrides_refused = bool(overrides) and not allow_overrides
-        marker, claim = _claim_run(
-            manager,
-            uuid.UUID(run_id),
-            correlation_id,
-            query_id,
-            overrides_refused=overrides_refused,
-        )
+        marker, claim = _claim_run(manager, uuid.UUID(run_id), correlation_id, query_id)
         if marker != "claimed" or claim is None:
             return marker
 
-        config = _resolve_config(overrides if allow_overrides else None)
-        outcome = await _spawn_attempt(query_id, claim, config)
+        outcome = await _spawn_attempt(query_id, claim, _resolve_config())
 
         return _settle_run(
             manager,

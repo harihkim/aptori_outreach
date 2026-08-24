@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0007_observation_hardening"
+HEAD_REVISION = "0008_observation_vocabulary"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -20,13 +20,45 @@ def _alembic_config(database_url: str) -> Config:
     return alembic_cfg
 
 
+def _purge_observations(database_url: str) -> None:
+    """Test-only cleanup: the table OWNER disables its guard triggers.
+
+    No privileged runtime surface exists in production (the SECURITY DEFINER
+    helper was removed in 0008); tests use plain owner SQL instead.
+    """
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE retrieval_observations DISABLE TRIGGER USER")
+            )
+            connection.execute(text("TRUNCATE retrieval_observations"))
+            connection.execute(
+                text("ALTER TABLE retrieval_observations ENABLE TRIGGER USER")
+            )
+    finally:
+        engine.dispose()
+
+
+def observation_count(database_url: str) -> int:
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            return int(
+                connection.execute(
+                    text("SELECT count(*) FROM retrieval_observations")
+                ).scalar_one()
+            )
+    finally:
+        engine.dispose()
+
+
 def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database: str) -> None:
     alembic_cfg = _alembic_config(migrated_test_database)
 
     # A previous suite may have left immutable evidence behind; only the
-    # sanctioned purge may empty the table before a full round trip.
-    with create_engine(migrated_test_database).begin() as connection:
-        connection.execute(text("SELECT aptori_force_drop_observations()"))
+    # owner-side purge may empty the table before a full round trip.
+    _purge_observations(migrated_test_database)
 
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
@@ -234,30 +266,37 @@ def test_truncate_is_rejected_by_guard_trigger(migrated_test_database: str) -> N
             connection.execute(text("TRUNCATE retrieval_observations"))
 
 
-def test_force_drop_observations_empties_table_and_restores_triggers(
+def test_security_definer_purge_surface_is_gone_at_head(
     migrated_test_database: str,
 ) -> None:
-    """The single sanctioned escape hatch: empty table, guards back on."""
-    engine = create_engine(migrated_test_database)
-    # Start from a clean table regardless of what earlier tests left behind.
-    with engine.begin() as connection:
-        connection.execute(text("SELECT aptori_force_drop_observations()"))
+    """SEC: no callable privileged purge exists in the shipped schema."""
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.upgrade(alembic_cfg, "head")
 
+    with create_engine(migrated_test_database).connect() as connection:
+        functions = connection.execute(
+            text(
+                "SELECT count(*) FROM pg_proc "
+                "WHERE proname = 'aptori_force_drop_observations'"
+            )
+        ).scalar_one()
+    assert functions == 0
+
+
+def test_owner_purge_empties_table_and_restores_triggers(
+    migrated_test_database: str,
+) -> None:
+    """Test cleanup path: owner disables triggers, truncates, re-enables."""
+    # Start from a clean table regardless of what earlier tests left behind.
+    _purge_observations(migrated_test_database)
+
+    engine = create_engine(migrated_test_database)
     with engine.begin() as connection:
         _seed_run_and_observation(connection)
-        count = connection.execute(
-            text("SELECT count(*) FROM retrieval_observations")
-        ).scalar_one()
-        assert count == 1
+    assert observation_count(migrated_test_database) == 1
 
-    with engine.begin() as connection:
-        connection.execute(text("SELECT aptori_force_drop_observations()"))
-
-    with engine.connect() as connection:
-        count = connection.execute(
-            text("SELECT count(*) FROM retrieval_observations")
-        ).scalar_one()
-        assert count == 0
+    _purge_observations(migrated_test_database)
+    assert observation_count(migrated_test_database) == 0
 
     # The row triggers are re-enabled after the purge.
     with pytest.raises(DBAPIError):
@@ -276,17 +315,14 @@ def test_discovery_migration_round_trips_through_previous_revision(
 ) -> None:
     alembic_cfg = _alembic_config(migrated_test_database)
 
-    # Immutable evidence blocks the downgrade until it is sanctioned away.
+    # Immutable evidence blocks the downgrade until it is purged.
     with create_engine(migrated_test_database).begin() as connection:
         _seed_run_and_observation(connection)
-    with create_engine(migrated_test_database).connect() as connection:
-        rows = connection.execute(text("SELECT count(*) FROM retrieval_observations")).scalar_one()
-        assert rows >= 1
+    assert observation_count(migrated_test_database) >= 1
     with pytest.raises(RuntimeError, match="retrieval_observations"):
         command.downgrade(alembic_cfg, "0005_stable_page_order")
 
-    with create_engine(migrated_test_database).begin() as connection:
-        connection.execute(text("SELECT aptori_force_drop_observations()"))
+    _purge_observations(migrated_test_database)
     command.downgrade(alembic_cfg, "0005_stable_page_order")
 
     with create_engine(migrated_test_database).connect() as connection:

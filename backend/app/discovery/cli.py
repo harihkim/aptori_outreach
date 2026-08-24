@@ -2,9 +2,18 @@
 
 The adapter is the only place that spawns the frozen Node tool. It owns the
 process boundary: argument wiring, timeout enforcement, and evidence
-resolution. When both stdout and disk carry an observation, disk wins
-(ADR-013) because the attempt directory is written transactionally by the
-tool while stdout is merely its last word.
+resolution.
+
+Disk authority: stdout may tell us WHERE the observation lives
+(evidenceDirectory), but only observation.json on disk is ever allowed to
+feed the full parser. A stdout projection without a pointer is classified
+explicitly (no_evidence_pointer) instead of being trusted, and a pointer to
+an unreadable artifact is classified explicitly too (disk_unreadable).
+
+After a timeout kill the adapter attempts deterministic disk recovery of an
+observation.json the CLI managed to write before it died; a recovered,
+valid document resolves the attempt normally (it is disk evidence like any
+other), while failed recovery falls back to the plain timeout classification.
 """
 
 import asyncio
@@ -13,7 +22,7 @@ import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.discovery.observations import redact_sensitive_text
 
@@ -22,50 +31,93 @@ from app.discovery.observations import redact_sensitive_text
 # tighter persistence cap before anything reaches the database.
 STDERR_TAIL_LIMIT = 4000
 
+# Where the authoritative document came from. Only "disk" ever carries a
+# document worth parsing.
+EvidenceSource = Literal["disk", "disk_unreadable", "no_evidence_pointer", "none"]
+
 
 @dataclass(frozen=True)
 class CliResult:
-    """Outcome of one retrieval CLI attempt.
-
-    evidence_unreadable means the authoritative on-disk observation.json
-    could not be read while stdout carried a parseable projection. The stdout
-    projection lacks schemaVersion guarantees, so it must never feed the full
-    parser; the runner records this outcome as an evidence failure instead of
-    trusting degraded stdout.
-    """
+    """Outcome of one retrieval CLI attempt."""
 
     exit_code: int
-    observation_doc: dict[str, Any] | None
     stderr_tail: str
     timed_out: bool
-    evidence_unreadable: bool = False
+    evidence_source: EvidenceSource = "none"
+    observation_doc: dict[str, Any] | None = None
 
 
-def _resolve_document(stdout_text: str) -> tuple[dict[str, Any] | None, bool]:
-    """Best-effort observation resolution: stdout first, disk as authority.
+def _read_disk_observation(evidence_directory: str) -> tuple[EvidenceSource, dict[str, Any] | None]:
+    """Read the authoritative observation.json below the evidence directory."""
+    disk_path = Path(evidence_directory) / "observation.json"
+    try:
+        parsed = json.loads(disk_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return "disk_unreadable", None
+    if isinstance(parsed, dict):
+        return "disk", parsed
+    return "disk_unreadable", None
 
-    Returns (document, evidence_unreadable). When the on-disk observation
-    exists but cannot be read, the honest answer is no document plus the
-    unreadable flag — never the untrustworthy stdout projection.
-    """
+
+def _resolve_authoritative_document(
+    stdout_text: str,
+) -> tuple[EvidenceSource, dict[str, Any] | None]:
+    """Locate the authoritative document via stdout; never trust its content."""
     try:
         parsed = json.loads(stdout_text)
     except json.JSONDecodeError:
-        return None, False
+        return "none", None
     if not isinstance(parsed, dict):
-        return None, False
+        return "none", None
 
     evidence_directory = parsed.get("evidenceDirectory")
-    if isinstance(evidence_directory, str) and evidence_directory:
-        disk_path = Path(evidence_directory) / "observation.json"
+    if not isinstance(evidence_directory, str) or not evidence_directory:
+        # Stdout carried no pointer to disk evidence. Its own content must
+        # never stand in for the authoritative artifact.
+        return "no_evidence_pointer", None
+    return _read_disk_observation(evidence_directory)
+
+
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _recover_timed_out_document(output_root: Path, query_id: str) -> dict[str, Any] | None:
+    """Deterministic disk recovery after a timeout kill.
+
+    Preference order: the attempt directory named for this query id first,
+    then any other observation.json under the evidence root, newest mtime
+    first with lexicographic path as the tie-break. The first candidate that
+    parses to a JSON object wins.
+    """
+    if not output_root.exists():
+        return None
+    try:
+        candidates = [
+            path for path in output_root.rglob("observation.json") if path.is_file()
+        ]
+    except OSError:
+        return None
+
+    preferred_parent = f"attempt-{query_id}"
+    candidates.sort(
+        key=lambda path: (
+            path.parent.name != preferred_parent,
+            -_mtime_ns(path),
+            str(path),
+        )
+    )
+    for path in candidates:
         try:
-            disk_doc = json.loads(disk_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None, True
-        if isinstance(disk_doc, dict):
-            return disk_doc, False
-        return None, True
-    return parsed, False
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 async def run_retrieval_cli(
@@ -105,6 +157,7 @@ async def run_retrieval_cli(
     )
 
     timed_out = False
+    recovered_document: dict[str, Any] | None = None
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             process.communicate(), timeout=timeout_seconds
@@ -116,22 +169,35 @@ async def run_retrieval_cli(
         except ProcessLookupError:
             process.kill()
         stdout_bytes, stderr_bytes = await process.communicate()
+        # The CLI may have finished writing its evidence before it died;
+        # disk recovery turns a killed attempt into a completed one.
+        recovered_document = _recover_timed_out_document(Path(output_root), query_id)
 
     stderr_tail = redact_sensitive_text(
         stderr_bytes.decode("utf-8", errors="replace")[-STDERR_TAIL_LIMIT:]
     )
 
+    if timed_out and recovered_document is not None:
+        # Resolved by authoritative disk evidence despite the kill.
+        return CliResult(
+            exit_code=process.returncode if process.returncode is not None else -1,
+            stderr_tail=stderr_tail,
+            timed_out=False,
+            evidence_source="disk",
+            observation_doc=recovered_document,
+        )
+
+    evidence_source: EvidenceSource = "none"
     observation_doc: dict[str, Any] | None = None
-    evidence_unreadable = False
     if not timed_out:
-        observation_doc, evidence_unreadable = _resolve_document(
+        evidence_source, observation_doc = _resolve_authoritative_document(
             stdout_bytes.decode("utf-8", errors="replace")
         )
 
     return CliResult(
         exit_code=process.returncode if process.returncode is not None else -1,
-        observation_doc=observation_doc,
         stderr_tail=stderr_tail,
         timed_out=timed_out,
-        evidence_unreadable=evidence_unreadable,
+        evidence_source=evidence_source,
+        observation_doc=observation_doc,
     )

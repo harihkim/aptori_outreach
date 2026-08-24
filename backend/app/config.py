@@ -36,6 +36,11 @@ class Settings(BaseSettings):
         REPO_ROOT / "retrieval-eval" / "prototype-smoke" / "queries-2026-08.json"
     )
     retrieval_evidence_root: Path = REPO_ROOT / "evidence-runs"
+    # Python-owned scratch space for query input documents. The evidence
+    # output root belongs to the retrieval CLI (ADR ownership); inputs are
+    # staged outside it so the two toolchains never write into each other's
+    # trees.
+    retrieval_input_scratch_root: Path = REPO_ROOT / "scratch" / "discovery-inputs"
     retrieval_attempt_timeout_seconds: int = Field(default=180, ge=5, le=900)
 
     model_config = SettingsConfigDict(

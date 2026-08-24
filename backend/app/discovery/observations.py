@@ -14,9 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 OBSERVATION_SCHEMA_VERSION = 1
 
 # Wire values emitted by the frozen Node observation document. The database
-# enforces a superset via ck_retrieval_observations_status_values: backend-
-# classified outcomes such as 'evidence_unreadable' are persisted with status
-# 'failed' and never arrive on this wire contract.
+# CHECK (ck_retrieval_observations_status_values) enforces exactly this set;
+# backend-classified outcomes are failure_class values under status='failed',
+# never statuses. Tests assert head-schema/ORM/contract parity.
 STATUS_VALUES = (
     "success",
     "no_results",

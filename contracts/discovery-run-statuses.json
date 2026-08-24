@@ -15,5 +15,6 @@
     "runtime_verification_failed",
     "failed"
   ],
-  "usableStatuses": ["success", "no_results", "incomplete"]
+  "usableStatuses": ["success", "no_results", "incomplete"],
+  "costStatuses": ["unpriced"]
 }

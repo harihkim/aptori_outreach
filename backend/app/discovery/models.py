@@ -20,12 +20,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.orm import Base
 
-# Wire values for the Discovery lifecycle and retrieval evidence. The database
-# enforces the same sets via CHECK constraints; the API layer validates first.
+# Wire values for the Discovery lifecycle and retrieval evidence. The
+# database CHECK constraints enforce exactly these sets (see migration 0008);
+# tests assert head-schema/ORM/contract parity so drift fails deterministically.
 DISCOVERY_RUN_STATUSES = ("queued", "running", "succeeded", "partial", "failed", "cancelled")
 OBSERVATION_CAPABILITIES = ("discovery", "thread_fetch")
-# Superset of observations.STATUS_VALUES: backend-classified outcomes such as
-# 'evidence_unreadable' are persisted here but never arrive on the Node wire.
+# Identical to observations.STATUS_VALUES: the twelve native statuses emitted
+# by the frozen Node observation document. Backend-classified outcomes such as
+# evidence_unreadable, transport_timeout, or contract_violation are failure_class
+# values under status='failed' — never statuses themselves.
 RETRIEVAL_OBSERVATION_STATUSES = (
     "success",
     "no_results",
@@ -39,8 +42,14 @@ RETRIEVAL_OBSERVATION_STATUSES = (
     "transport_failed",
     "runtime_verification_failed",
     "failed",
-    "evidence_unreadable",
 )
+# Currency-cost state for runs. The backend never prices retrieval: the only
+# honest state today is 'unpriced', and cost_usd stays null. Unmeasured usage
+# dimensions stay null too — never zero. Measured retrieval usage (wall time,
+# request counts) is reported under run.metrics.usage; terminology is usage,
+# never billing: no billing exists.
+RUN_COST_STATUSES = ("unpriced",)
+RUN_COST_UNPRICED = "unpriced"
 
 
 def _in_values(column: str, values: tuple[str, ...]) -> str:

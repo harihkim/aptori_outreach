@@ -2,12 +2,16 @@
 
 The adapter spawns `<node_bin> <cli_path> discover --config .. --input ..
 --id .. --output-root ..`, tolerates timeouts, and treats the on-disk
-observation.json as authoritative over stdout when both exist (ADR-013).
+observation.json as the ONLY authoritative document (ADR-013): stdout may
+locate evidence but its content never feeds the parser. After a timeout
+kill it attempts deterministic disk recovery of a written observation.
 """
 
 import asyncio
 import json
+import os
 import textwrap
+import time
 from pathlib import Path
 
 from app.discovery.cli import CliResult, run_retrieval_cli
@@ -62,11 +66,11 @@ def invoke(stub: Path, tmp_path: Path, *, timeout_seconds: float = 10) -> CliRes
     )
 
 
-def test_success_doc_round_trips_from_disk(tmp_path: Path) -> None:
-    doc = {
+def full_disk_doc(tmp_path: Path, *, status: str = "success") -> dict[str, object]:
+    return {
         "schemaVersion": 1,
         "observationId": "attempt-q-1",
-        "status": "success",
+        "status": status,
         "capability": "discovery",
         "providerVariant": "obscura-duckduckgo-lite",
         "configSha256": "0" * 64,
@@ -74,6 +78,10 @@ def test_success_doc_round_trips_from_disk(tmp_path: Path) -> None:
         "completedAt": "2026-08-23T00:00:01Z",
         "evidenceDirectory": str(tmp_path / "evidence" / "attempts" / "attempt-q-1"),
     }
+
+
+def test_success_doc_round_trips_from_disk(tmp_path: Path) -> None:
+    doc = full_disk_doc(tmp_path)
     stub = write_stub_node(
         tmp_path,
         body=f"""
@@ -88,8 +96,9 @@ def test_success_doc_round_trips_from_disk(tmp_path: Path) -> None:
     assert isinstance(result, CliResult)
     assert result.timed_out is False
     assert result.exit_code == 0
-    assert result.stderr_tail == ""
+    assert result.evidence_source == "disk"
     assert result.observation_doc == doc
+    assert result.stderr_tail == ""
 
 
 def test_disk_observation_is_authoritative_over_stdout(tmp_path: Path) -> None:
@@ -117,9 +126,37 @@ def test_disk_observation_is_authoritative_over_stdout(tmp_path: Path) -> None:
 
     result = invoke(stub, tmp_path)
 
+    assert result.evidence_source == "disk"
     assert result.observation_doc == disk_doc
     assert result.observation_doc is not None
     assert result.observation_doc["status"] == "no_results"
+
+
+def test_stdout_without_pointer_is_never_the_document(tmp_path: Path) -> None:
+    """A complete-looking stdout projection without a pointer is unlocated."""
+    projection = {
+        "schemaVersion": 1,
+        "observationId": "attempt-q-1",
+        "capability": "discovery",
+        "providerVariant": "obscura-duckduckgo-lite",
+        "configSha256": "0" * 64,
+        "startedAt": "2026-08-23T00:00:00Z",
+        "completedAt": "2026-08-23T00:00:01Z",
+        "status": "success",
+    }
+    stub = write_stub_node(
+        tmp_path,
+        body=f"""
+            printf '%s' '{json.dumps(projection)}'
+            exit 0
+            """,
+    )
+
+    result = invoke(stub, tmp_path)
+
+    assert result.exit_code == 0
+    assert result.evidence_source == "no_evidence_pointer"
+    assert result.observation_doc is None
 
 
 def test_nonzero_exit_with_stderr_yields_no_document(tmp_path: Path) -> None:
@@ -135,6 +172,7 @@ def test_nonzero_exit_with_stderr_yields_no_document(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.timed_out is False
+    assert result.evidence_source == "none"
     assert result.observation_doc is None
     assert "boom: provider exploded" in result.stderr_tail
 
@@ -151,31 +189,12 @@ def test_unparseable_stdout_yields_no_document(tmp_path: Path) -> None:
     result = invoke(stub, tmp_path)
 
     assert result.exit_code == 0
-    assert result.observation_doc is None
-
-
-def test_timeout_kills_process_and_reports(tmp_path: Path) -> None:
-    stub = write_stub_node(
-        tmp_path,
-        body="""
-            sleep 30
-            exit 0
-            """,
-    )
-
-    result = invoke(stub, tmp_path, timeout_seconds=1)
-
-    assert result.timed_out is True
+    assert result.evidence_source == "none"
     assert result.observation_doc is None
 
 
 def test_unreadable_disk_document_never_trusts_stdout(tmp_path: Path) -> None:
-    """Garbage on disk plus a parseable stdout projection is evidence failure.
-
-    The stdout projection carries no schemaVersion guarantee, so the adapter
-    returns no document and flags the evidence as unreadable instead of
-    letting degraded stdout masquerade as authoritative.
-    """
+    """Garbage on disk plus a parseable pointer-bearing stdout fails honestly."""
     stdout_doc = {
         "status": "success",
         "observationId": "attempt-q-1",
@@ -193,7 +212,69 @@ def test_unreadable_disk_document_never_trusts_stdout(tmp_path: Path) -> None:
     result = invoke(stub, tmp_path)
 
     assert result.observation_doc is None
-    assert result.evidence_unreadable is True
+    assert result.evidence_source == "disk_unreadable"
+
+
+def test_timeout_without_written_evidence_reports_timeout(tmp_path: Path) -> None:
+    stub = write_stub_node(
+        tmp_path,
+        body="""
+            sleep 30
+            exit 0
+            """,
+    )
+
+    result = invoke(stub, tmp_path, timeout_seconds=1)
+
+    assert result.timed_out is True
+    assert result.evidence_source == "none"
+    assert result.observation_doc is None
+
+
+def test_timeout_recovers_already_written_observation_from_disk(tmp_path: Path) -> None:
+    doc = full_disk_doc(tmp_path)
+    stub = write_stub_node(
+        tmp_path,
+        body=f"""
+            printf '%s' '{json.dumps(doc)}' > "$ATTEMPT_DIR/observation.json"
+            sleep 30
+            exit 0
+            """,
+    )
+
+    result = invoke(stub, tmp_path, timeout_seconds=1)
+
+    # The kill happened after the evidence landed; recovery resolves it.
+    assert result.timed_out is False
+    assert result.evidence_source == "disk"
+    assert result.observation_doc == doc
+
+
+def test_recovery_prefers_this_querys_attempt_directory(tmp_path: Path) -> None:
+    """Deterministic recovery: attempt-q-1 wins even with an older mtime."""
+    preferred = full_disk_doc(tmp_path)
+    other = dict(full_disk_doc(tmp_path, status="no_results"))
+    other["observationId"] = "attempt-other"
+    other_dir = tmp_path / "evidence" / "attempts" / "attempt-other"
+    other_dir.mkdir(parents=True, exist_ok=True)
+    (other_dir / "observation.json").write_text(json.dumps(other), encoding="utf-8")
+
+    older = time.time() - 60
+    os.utime((other_dir / "observation.json"), (older, older))
+
+    stub = write_stub_node(
+        tmp_path,
+        body=f"""
+            printf '%s' '{json.dumps(preferred)}' > "$ATTEMPT_DIR/observation.json"
+            sleep 30
+            exit 0
+            """,
+    )
+
+    result = invoke(stub, tmp_path, timeout_seconds=1)
+
+    assert result.timed_out is False
+    assert result.observation_doc == preferred
 
 
 def test_stderr_tail_is_redacted_before_return(tmp_path: Path) -> None:

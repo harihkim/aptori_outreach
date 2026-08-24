@@ -5,9 +5,13 @@ test seeds its own uuid-keyed campaign/run rows in a dedicated worker test
 database and asserts by run id. No trigger is ever bypassed; the dedicated
 database keeps those append-only rows away from suites that clean shared
 tables.
+
+Spawn configuration flows exclusively through settings (env vars + settings
+cache reset); the production runner has no override channel.
 """
 
 import asyncio
+import inspect
 import json
 import textwrap
 import uuid
@@ -26,6 +30,7 @@ from app.auditing.models import AuditEvent
 from app.campaigns.models import Campaign
 from app.config import get_settings
 from app.discovery.models import DiscoveryRun, RetrievalObservation
+from app.discovery.observations import STATUS_VALUES
 from app.discovery.runner import _parse_iso, run_discovery_query
 from app.discovery.worker import reap_stale_running_runs
 from app.workspaces import DEFAULT_WORKSPACE_ID
@@ -62,21 +67,6 @@ def worker_db(worker_database_url: str, monkeypatch: pytest.MonkeyPatch) -> Iter
     get_settings.cache_clear()
 
 
-def write_stub_node(tmp_path: Path, docs_dir: Path, *, sleep_seconds: int | None = None) -> Path:
-    """Generate a fake node binary serving fixture docs keyed by query id."""
-    if sleep_seconds is not None:
-        tail = f"sleep {sleep_seconds}\nexit 0\n"
-    else:
-        tail = (
-            'DOC="$DOCS/$ID.json"\n'
-            'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
-            '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
-            'cat "$ATTEMPT_DIR/observation.json"\n'
-            "exit 0\n"
-        )
-    return write_raw_stub(tmp_path, f'DOCS="{docs_dir}"\n' + tail)
-
-
 def write_raw_stub(tmp_path: Path, tail: str) -> Path:
     """Generate a fake node binary running an arbitrary bash tail."""
     stub = tmp_path / "fake-node.js"
@@ -103,6 +93,70 @@ def write_raw_stub(tmp_path: Path, tail: str) -> Path:
     return stub
 
 
+DOCS_SERVING_TAIL = (
+    'DOC="$DOCS/$ID.json"\n'
+    'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
+    '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
+    'cat "$ATTEMPT_DIR/observation.json"\n'
+    "exit 0\n"
+)
+
+
+class StubHarness:
+    """Stub CLI runtime wired through settings; install() activates it."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        *,
+        sleep_seconds: int | None = None,
+        tail: str | None = None,
+        timeout_seconds: float = 10,
+    ) -> None:
+        self.monkeypatch = monkeypatch
+        self.tmp_path = tmp_path
+        self.docs_dir = tmp_path / "docs"
+        self.docs_dir.mkdir(parents=True, exist_ok=True)
+        self.evidence_root = tmp_path / "evidence-runs"
+        self.input_root = tmp_path / "input-scratch"
+        self.cli_path = tmp_path / "retrieval-cli.js"
+        self.config_path = tmp_path / "provider-config.json"
+        self.config_path.write_text(json.dumps({"providerVariant": "stub"}))
+        self.timeout_seconds = timeout_seconds
+        if tail is None:
+            tail = f"sleep {sleep_seconds}\nexit 0\n" if sleep_seconds else DOCS_SERVING_TAIL
+        body = f'DOCS="{self.docs_dir}"\n' + tail
+        self.node_bin = write_raw_stub(tmp_path, body)
+
+    def use_tail(self, tail: str) -> None:
+        """Swap in a custom stub tail and re-install the settings seam."""
+        self.node_bin = write_raw_stub(self.tmp_path, f'DOCS="{self.docs_dir}"\n' + tail)
+        self.install()
+
+    def write_doc(self, qid: str, doc: dict[str, object]) -> None:
+        (self.docs_dir / f"{qid}.json").write_text(json.dumps(doc))
+
+    def install(self) -> None:
+        mp = self.monkeypatch
+        mp.setenv("APTORI_RETRIEVAL_NODE_BIN", str(self.node_bin))
+        mp.setenv("APTORI_RETRIEVAL_CLI_PATH", str(self.cli_path))
+        mp.setenv("APTORI_DISCOVERY_PROVIDER_CONFIG_PATH", str(self.config_path))
+        mp.setenv("APTORI_RETRIEVAL_EVIDENCE_ROOT", str(self.evidence_root))
+        mp.setenv("APTORI_RETRIEVAL_INPUT_SCRATCH_ROOT", str(self.input_root))
+        mp.setenv("APTORI_RETRIEVAL_ATTEMPT_TIMEOUT_SECONDS", str(self.timeout_seconds))
+        get_settings.cache_clear()
+
+
+@pytest.fixture()
+def harness(worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[StubHarness]:
+    """A default installed stub runtime for one test."""
+    stub_harness = StubHarness(monkeypatch, tmp_path)
+    stub_harness.install()
+    yield stub_harness
+    get_settings.cache_clear()
+
+
 def fixture_doc(qid: str, status: str = "success", **overrides: object) -> dict[str, object]:
     """A discovery-shaped document matching packages/obscura-retrieval."""
     doc: dict[str, object] = {
@@ -123,38 +177,12 @@ def fixture_doc(qid: str, status: str = "success", **overrides: object) -> dict[
         "normalizedSha256": "a" * 64,
         "candidateCount": 3,
         "candidates": [{"title": "t", "url": "https://reddit.com/r/x"}],
-        "network": {"requests": 2},
+        "network": {"requests": {"q-a": 14, "q-b": 7}.get(qid, 5)},
         "runtime": {"node": "20.18.0"},
         "evidenceDirectory": "@@EVIDENCE@@/attempt-@@QID@@",
     }
     doc.update(overrides)
     return doc
-
-
-class StubHarness:
-    """Stub executable plus fixture docs for one test."""
-
-    def __init__(self, tmp_path: Path, *, sleep_seconds: int | None = None) -> None:
-        self.docs_dir = tmp_path / "docs"
-        self.docs_dir.mkdir(parents=True, exist_ok=True)
-        self.evidence_root = tmp_path / "evidence-runs"
-        self.node_bin = write_stub_node(tmp_path, self.docs_dir, sleep_seconds=sleep_seconds)
-        self.cli_path = tmp_path / "retrieval-cli.js"
-        self.config_path = tmp_path / "provider-config.json"
-        self.config_path.write_text(json.dumps({"providerVariant": "stub"}))
-        self.timeout_seconds = 10
-
-    def add_doc(self, qid: str, doc: dict[str, object]) -> None:
-        (self.docs_dir / f"{qid}.json").write_text(json.dumps(doc))
-
-    def overrides(self) -> dict[str, object]:
-        return {
-            "node_bin": str(self.node_bin),
-            "cli_path": str(self.cli_path),
-            "provider_config_path": str(self.config_path),
-            "evidence_root": str(self.evidence_root),
-            "timeout_seconds": self.timeout_seconds,
-        }
 
 
 def seed_run(database_url: str, *, correlation_id: str, query_ids: list[str]) -> uuid.UUID:
@@ -194,31 +222,15 @@ def seed_run(database_url: str, *, correlation_id: str, query_ids: list[str]) ->
         engine.dispose()
 
 
-def invoke(run_id: uuid.UUID, qid: str, harness: StubHarness) -> str:
+def invoke(run_id: uuid.UUID, qid: str, *, correlation_id: str = "corr-123") -> str:
     return asyncio.run(
         run_discovery_query(
             None,
             run_id=str(run_id),
-            correlation_id="corr-123",
+            correlation_id=correlation_id,
             query_id=qid,
-            overrides=harness.overrides(),
-            allow_overrides=True,
         )
     )
-
-
-def raw_overrides(stub: Path, tmp_path: Path, *, timeout_seconds: float = 10) -> dict[str, object]:
-    """Spawn overrides pointing at an ad-hoc stub for classification tests."""
-    config_path = tmp_path / "provider-config.json"
-    if not config_path.exists():
-        config_path.write_text(json.dumps({"providerVariant": "stub"}))
-    return {
-        "node_bin": str(stub),
-        "cli_path": str(tmp_path / "retrieval-cli.js"),
-        "provider_config_path": str(config_path),
-        "evidence_root": str(tmp_path / "evidence-runs"),
-        "timeout_seconds": timeout_seconds,
-    }
 
 
 def load_run(database_url: str, run_id: uuid.UUID) -> DiscoveryRun:
@@ -275,14 +287,13 @@ def row_by_query(rows: list[RetrievalObservation], qid: str) -> RetrievalObserva
     return matches[0]
 
 
-def test_success_and_no_results_complete_the_run(worker_db: str, tmp_path: Path) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
-    harness.add_doc("q-b", fixture_doc("q-b", "no_results"))
+def test_success_and_no_results_complete_the_run(harness: StubHarness, worker_db: str) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-b", fixture_doc("q-b", "no_results"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    invoke(run_id, "q-a", harness)
-    final_status = invoke(run_id, "q-b", harness)
+    invoke(run_id, "q-a")
+    final_status = invoke(run_id, "q-b")
 
     assert final_status == "succeeded"
     run = load_run(worker_db, run_id)
@@ -290,9 +301,15 @@ def test_success_and_no_results_complete_the_run(worker_db: str, tmp_path: Path)
     assert run.started_at is not None
     assert run.completed_at is not None
     assert run.metrics is not None
-    assert run.metrics["counts"] == {"success": 1, "no_results": 1}
+    assert run.metrics["counts"] == {"no_results": 1, "success": 1}
+    # Measured retrieval usage only: sums of what the attempts reported.
     assert run.metrics["total_elapsed_ms"] == 1500
     assert run.metrics["cost_usd"] is None
+    assert run.metrics["cost_status"] == "unpriced"
+    assert run.metrics["usage"] == {
+        "request_count": 21,  # 14 + 7, exactly as the fixtures measured
+        "bytes_transferred": None,  # never measured: null, not zero
+    }
 
     rows = load_rows(worker_db, run_id)
     success_row = row_by_query(rows, "q-a")
@@ -302,17 +319,29 @@ def test_success_and_no_results_complete_the_run(worker_db: str, tmp_path: Path)
     assert success_row.candidate_count == 3
     assert success_row.observation_id == "attempt-q-a"
     assert success_row.evidence_directory.endswith("attempt-q-a")
+    assert success_row.network == {"requests": 14}
     assert no_results_row.status == "no_results"
+    assert no_results_row.failure_class is None
+
+    # Python owns input staging; the CLI-owned evidence root never gains
+    # python-written input files (ADR ownership split).
+    staged_input = harness.input_root / str(run_id) / "input-q-a.json"
+    assert staged_input.is_file()
+    assert list(staged_input.parent.glob("input-q-b.json"))
+    leaked_inputs = [
+        path.name
+        for path in harness.evidence_root.rglob("input-*.json")
+    ]
+    assert leaked_inputs == []
 
 
-def test_success_plus_blocked_is_partial(worker_db: str, tmp_path: Path) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
-    harness.add_doc("q-b", fixture_doc("q-b", "blocked"))
+def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-b", fixture_doc("q-b", "blocked"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    invoke(run_id, "q-a", harness)
-    final_status = invoke(run_id, "q-b", harness)
+    invoke(run_id, "q-a")
+    final_status = invoke(run_id, "q-b")
 
     assert final_status == "partial"
     run = load_run(worker_db, run_id)
@@ -322,14 +351,13 @@ def test_success_plus_blocked_is_partial(worker_db: str, tmp_path: Path) -> None
     assert blocked_row.failure_class is None
 
 
-def test_blocked_and_rate_limited_fail_the_run(worker_db: str, tmp_path: Path) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "blocked"))
-    harness.add_doc("q-b", fixture_doc("q-b", "rate_limited"))
+def test_blocked_and_rate_limited_fail_the_run(harness: StubHarness, worker_db: str) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "blocked"))
+    harness.write_doc("q-b", fixture_doc("q-b", "rate_limited"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    invoke(run_id, "q-a", harness)
-    final_status = invoke(run_id, "q-b", harness)
+    invoke(run_id, "q-a")
+    final_status = invoke(run_id, "q-b")
 
     assert final_status == "failed"
     run = load_run(worker_db, run_id)
@@ -339,15 +367,14 @@ def test_blocked_and_rate_limited_fail_the_run(worker_db: str, tmp_path: Path) -
 
 
 def test_unknown_schema_version_persists_unclassified_failure(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
-    harness.add_doc("q-bad", fixture_doc("q-bad", "success", schemaVersion=99))
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-bad", fixture_doc("q-bad", "success", schemaVersion=99))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-bad"])
 
-    invoke(run_id, "q-a", harness)
-    final_status = invoke(run_id, "q-bad", harness)
+    invoke(run_id, "q-a")
+    final_status = invoke(run_id, "q-bad")
 
     assert final_status == "partial"
     run = load_run(worker_db, run_id)
@@ -361,15 +388,14 @@ def test_unknown_schema_version_persists_unclassified_failure(
 
 
 def test_replay_same_query_does_not_duplicate_observation(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
 
-    first_status = invoke(run_id, "q-a", harness)
+    first_status = invoke(run_id, "q-a")
     # The completed run is terminal, so a redelivery observes 'already_done'.
-    second_status = invoke(run_id, "q-a", harness)
+    second_status = invoke(run_id, "q-a")
 
     assert first_status == "succeeded"
     assert second_status == "already_done"
@@ -381,13 +407,12 @@ def test_replay_same_query_does_not_duplicate_observation(
 
 
 def test_correlation_id_flows_to_observations_and_audit(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
 
-    invoke(run_id, "q-a", harness)
+    invoke(run_id, "q-a")
 
     rows = load_rows(worker_db, run_id)
     assert [row.correlation_id for row in rows] == ["corr-123"]
@@ -401,12 +426,14 @@ def test_correlation_id_flows_to_observations_and_audit(
     assert completed.after == {"status": "succeeded"}
 
 
-def test_timeout_classifies_transport_timeout(worker_db: str, tmp_path: Path) -> None:
-    harness = StubHarness(tmp_path, sleep_seconds=30)
+def test_timeout_without_disk_evidence_classifies_transport_timeout(
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = StubHarness(monkeypatch, tmp_path, sleep_seconds=30, timeout_seconds=5)
+    harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-slow"])
-    harness.timeout_seconds = 1
 
-    final_status = invoke(run_id, "q-slow", harness)
+    final_status = invoke(run_id, "q-slow")
 
     assert final_status == "failed"
     run = load_run(worker_db, run_id)
@@ -416,21 +443,44 @@ def test_timeout_classifies_transport_timeout(worker_db: str, tmp_path: Path) ->
     assert slow_row.failure_class == "transport_timeout"
 
 
-def test_wrapper_error_classified_from_plain_exit_one(worker_db: str, tmp_path: Path) -> None:
-    stub = write_raw_stub(tmp_path, 'echo "boom: wrapper crashed" >&2\nexit 1\n')
-    overrides = raw_overrides(stub, tmp_path)
+def test_timeout_with_written_evidence_recovers_completed_observation(
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P0 recovery: SIGKILL after the evidence was written still completes."""
+    harness = StubHarness(monkeypatch, tmp_path, timeout_seconds=5)
+    harness.use_tail(
+        'DOC="$DOCS/$ID.json"\n'
+        'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
+        '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
+        "sleep 30\n"
+        "exit 0\n"
+    )
+    harness.write_doc("q-rec", fixture_doc("q-rec", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-rec"])
+
+    final_status = invoke(run_id, "q-rec")
+
+    # The killed attempt resolved through its authoritative disk artifact.
+    assert final_status == "succeeded"
+    recovered_row = row_by_query(load_rows(worker_db, run_id), "q-rec")
+    assert recovered_row.status == "success"
+    assert recovered_row.failure_class is None
+    assert recovered_row.observation_id == "attempt-q-rec"
+    run = load_run(worker_db, run_id)
+    assert run.status == "succeeded"
+    assert not [
+        event for event in load_audit(worker_db, run_id) if event.action == "discovery_run.reaped"
+    ]
+
+
+def test_wrapper_error_classified_from_plain_exit_one(
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = StubHarness(monkeypatch, tmp_path, tail='echo "boom: wrapper crashed" >&2\nexit 1\n')
+    harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
-    final_status = asyncio.run(
-        run_discovery_query(
-            None,
-            run_id=str(run_id),
-            correlation_id="corr-123",
-            query_id="q-x",
-            overrides=overrides,
-            allow_overrides=True,
-        )
-    )
+    final_status = invoke(run_id, "q-x")
 
     assert final_status == "failed"
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
@@ -439,59 +489,44 @@ def test_wrapper_error_classified_from_plain_exit_one(worker_db: str, tmp_path: 
 
 
 def test_transport_error_classified_from_other_nonzero_exit(
-    worker_db: str, tmp_path: Path
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    stub = write_raw_stub(tmp_path, 'echo "segfault-ish" >&2\nexit 2\n')
-    overrides = raw_overrides(stub, tmp_path)
+    harness = StubHarness(monkeypatch, tmp_path, tail='echo "segfault-ish" >&2\nexit 2\n')
+    harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
-    asyncio.run(
-        run_discovery_query(
-            None,
-            run_id=str(run_id),
-            correlation_id="corr-123",
-            query_id="q-x",
-            overrides=overrides,
-            allow_overrides=True,
-        )
-    )
+    invoke(run_id, "q-x")
 
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
     assert row.failure_class == "transport_error"
 
 
-def test_runtime_verification_marker_is_classified(worker_db: str, tmp_path: Path) -> None:
-    stub = write_raw_stub(
-        tmp_path, 'echo "Error: verifyRuntime failed: Node version too old" >&2\nexit 1\n'
+def test_runtime_verification_marker_is_classified(
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = StubHarness(
+        monkeypatch,
+        tmp_path,
+        tail='echo "Error: verifyRuntime failed: Node version too old" >&2\nexit 1\n',
     )
-    overrides = raw_overrides(stub, tmp_path)
+    harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
-    asyncio.run(
-        run_discovery_query(
-            None,
-            run_id=str(run_id),
-            correlation_id="corr-123",
-            query_id="q-x",
-            overrides=overrides,
-            allow_overrides=True,
-        )
-    )
+    invoke(run_id, "q-x")
 
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
     assert row.failure_class == "runtime_verification_failed"
 
 
 def test_oversized_document_field_is_contract_violation(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success", observationId="x" * 300))
-    harness.add_doc("q-b", fixture_doc("q-b", "success"))
+    harness.write_doc("q-a", fixture_doc("q-a", "success", observationId="x" * 300))
+    harness.write_doc("q-b", fixture_doc("q-b", "success"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    invoke(run_id, "q-a", harness)
-    final_status = invoke(run_id, "q-b", harness)
+    invoke(run_id, "q-a")
+    final_status = invoke(run_id, "q-b")
 
     assert final_status == "partial"
     bad_row = row_by_query(load_rows(worker_db, run_id), "q-a")
@@ -501,13 +536,12 @@ def test_oversized_document_field_is_contract_violation(
 
 
 def test_unknown_observation_status_persists_classification(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "kind_of_fine"))
+    harness.write_doc("q-a", fixture_doc("q-a", "kind_of_fine"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
 
-    final_status = invoke(run_id, "q-a", harness)
+    final_status = invoke(run_id, "q-a")
 
     assert final_status == "failed"
     row = row_by_query(load_rows(worker_db, run_id), "q-a")
@@ -516,13 +550,12 @@ def test_unknown_observation_status_persists_classification(
 
 
 def test_non_discovery_capability_is_contract_violation(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success", capability="thread_fetch"))
+    harness.write_doc("q-a", fixture_doc("q-a", "success", capability="thread_fetch"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
 
-    final_status = invoke(run_id, "q-a", harness)
+    final_status = invoke(run_id, "q-a")
 
     assert final_status == "failed"
     row = row_by_query(load_rows(worker_db, run_id), "q-a")
@@ -530,39 +563,141 @@ def test_non_discovery_capability_is_contract_violation(
     assert "capability" in (row.failure_reason or "")
 
 
-def test_evidence_unreadable_beats_stdout_projection(
-    worker_db: str, tmp_path: Path
+def test_unreadable_disk_evidence_beats_stdout_projection(
+    harness: StubHarness, worker_db: str
 ) -> None:
-    """Garbage disk document plus a plausible stdout projection must fail.
-
-    The stdout projection lacks schemaVersion guarantees, so it can never
-    feed the full parser; the honest outcome is evidence_unreadable.
-    """
-    stub = write_raw_stub(
-        tmp_path,
+    """Garbage disk document plus pointer-bearing stdout must fail honestly."""
+    harness.use_tail(
         'printf "garbage not json" > "$ATTEMPT_DIR/observation.json"\n'
         'printf \'{"status":"success","observationId":"attempt-%s",'
         '"evidenceDirectory":"%s"}\' "$ID" "$ATTEMPT_DIR"\n'
-        "exit 0\n",
+        "exit 0\n"
     )
-    overrides = raw_overrides(stub, tmp_path)
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
-    final_status = asyncio.run(
-        run_discovery_query(
-            None,
-            run_id=str(run_id),
-            correlation_id="corr-123",
-            query_id="q-x",
-            overrides=overrides,
-            allow_overrides=True,
-        )
-    )
+    final_status = invoke(run_id, "q-x")
 
     assert final_status == "failed"
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
     assert row.status == "failed"
     assert row.failure_class == "evidence_unreadable"
+
+
+def test_stdout_without_pointer_is_never_trusted_as_evidence(
+    harness: StubHarness, worker_db: str
+) -> None:
+    """P0: stdout may locate evidence but can never BE the observation."""
+    projection = {
+        "schemaVersion": 1,
+        "observationId": "attempt-q-x",
+        "capability": "discovery",
+        "providerVariant": "stub",
+        "configSha256": "0" * 64,
+        "startedAt": "2026-08-23T00:00:00Z",
+        "completedAt": "2026-08-23T00:00:01Z",
+        "status": "success",
+        # Deliberately NO evidenceDirectory: nothing on disk to trust.
+    }
+    harness.use_tail(f'printf \'%s\' \'{json.dumps(projection)}\'\nexit 0\n')
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    final_status = invoke(run_id, "q-x")
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unlocated"
+    assert "evidenceDirectory" in (row.failure_reason or "")
+    assert row.observation_id == f"{run_id}:q-x:unclassified"
+
+
+def test_stdout_projection_never_feeds_the_full_parser(
+    harness: StubHarness, worker_db: str
+) -> None:
+    """Even a schema-breaking stdout doc stays unlocated, never parsed."""
+    hostile_projection = {
+        "schemaVersion": 99,  # would raise unknown_observation_schema if parsed
+        "status": "kind_of_fine",  # would raise unknown_observation_status if parsed
+        "observationId": "attempt-q-x",
+    }
+    harness.use_tail(f'printf \'%s\' \'{json.dumps(hostile_projection)}\'\nexit 0\n')
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    invoke(run_id, "q-x")
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.failure_class == "evidence_unlocated"
+
+
+@pytest.mark.parametrize("native_status", STATUS_VALUES)
+def test_every_native_status_round_trips_end_to_end(
+    harness: StubHarness, worker_db: str, native_status: str
+) -> None:
+    qid = f"st-{native_status}"
+    harness.write_doc(qid, fixture_doc(qid, native_status))
+    run_id = seed_run(worker_db, correlation_id="corr-e2e", query_ids=[qid])
+
+    final_status = invoke(run_id, qid, correlation_id="corr-e2e")
+
+    row = row_by_query(load_rows(worker_db, run_id), qid)
+    assert row.status == native_status
+    assert row.failure_class is None
+    assert row.correlation_id == "corr-e2e"
+
+    # Single-query rollup ruling per status usability.
+    if native_status in ("success", "no_results"):
+        expected_rollup = "succeeded"
+    elif native_status == "incomplete":
+        # Usable evidence, but nothing was fully lost-or-found: partial.
+        expected_rollup = "partial"
+    else:
+        expected_rollup = "failed"
+    assert final_status == expected_rollup
+    run = load_run(worker_db, run_id)
+    assert run.status == expected_rollup
+
+
+def test_all_twelve_statuses_roll_up_to_partial_with_usage_sums(
+    harness: StubHarness, worker_db: str
+) -> None:
+    qids: list[str] = []
+    total_requests = 0
+    total_elapsed = 0
+    for index, native_status in enumerate(STATUS_VALUES, start=1):
+        qid = f"q{index:02d}"
+        requests = index * 3
+        elapsed = index * 100
+        total_requests += requests
+        total_elapsed += elapsed
+        harness.write_doc(
+            qid,
+            fixture_doc(qid, native_status, network={"requests": requests}, elapsedMs=elapsed),
+        )
+        qids.append(qid)
+
+    run_id = seed_run(worker_db, correlation_id="corr-all12", query_ids=qids)
+    for qid in qids[:-1]:
+        invoke(run_id, qid)
+    final_status = invoke(run_id, qids[-1])
+
+    assert final_status == "partial"  # usable and unusable outcomes both present
+    run = load_run(worker_db, run_id)
+    assert run.metrics is not None
+    counts = run.metrics["counts"]
+    assert isinstance(counts, dict)
+    assert sorted(counts) == sorted(STATUS_VALUES)
+    assert all(count == 1 for count in counts.values())
+    assert run.metrics["total_elapsed_ms"] == total_elapsed
+    assert run.metrics["cost_status"] == "unpriced"
+    assert run.metrics["cost_usd"] is None
+    usage = run.metrics["usage"]
+    assert isinstance(usage, dict)
+    assert usage["request_count"] == total_requests
+    assert usage["bytes_transferred"] is None
+
+    rows = load_rows(worker_db, run_id)
+    assert {row.status for row in rows} == set(STATUS_VALUES)
+    assert all(row.failure_class is None for row in rows)
 
 
 def test_reaper_fails_stale_running_run(worker_db: str) -> None:
@@ -596,81 +731,52 @@ def test_reaper_fails_stale_running_run(worker_db: str) -> None:
     assert reaped_events[0].after == {"status": "failed"}
 
 
-def test_reaper_leaves_fresh_runs_alone(worker_db: str) -> None:
-    run_id = seed_run(worker_db, correlation_id="corr-fresh", query_ids=["q-a"])
+def test_reaper_leaves_fresh_queued_and_terminal_runs_alone(worker_db: str) -> None:
+    fresh_running = seed_run(worker_db, correlation_id="corr-fresh-r", query_ids=["q-a"])
+    queued = seed_run(worker_db, correlation_id="corr-fresh-q", query_ids=["q-b"])
+    terminal = seed_run(worker_db, correlation_id="corr-fresh-t", query_ids=["q-c"])
+    stale_cutoff = datetime.now(UTC) - timedelta(hours=2)
     engine = create_engine(worker_db)
     try:
         with Session(engine) as session:
-            run = session.get(DiscoveryRun, run_id)
-            assert run is not None
-            run.status = "running"
-            run.started_at = datetime.now(UTC)
+            running = session.get(DiscoveryRun, fresh_running)
+            assert running is not None
+            running.status = "running"
+            running.started_at = datetime.now(UTC)
+            terminal_run = session.get(DiscoveryRun, terminal)
+            assert terminal_run is not None
+            terminal_run.status = "cancelled"
+            terminal_run.started_at = stale_cutoff
+            queued_run = session.get(DiscoveryRun, queued)
+            assert queued_run is not None
+            queued_run.created_at = stale_cutoff  # old but never claimed
             session.commit()
     finally:
         engine.dispose()
 
     asyncio.run(reap_stale_running_runs(None))
 
-    fresh_run = load_run(worker_db, run_id)
-    assert fresh_run.status == "running"
-    assert fresh_run.metrics is None
-    reaped_events = [
-        event
-        for event in load_audit(worker_db, run_id)
-        if event.action == "discovery_run.reaped"
-    ]
-    assert reaped_events == []
-
-
-def test_overrides_are_refused_without_allow_overrides_flag(
-    worker_db: str, tmp_path: Path
-) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
-    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
-
-    final_status = asyncio.run(
-        run_discovery_query(
-            None,
-            run_id=str(run_id),
-            correlation_id="corr-123",
-            query_id="q-a",
-            overrides=harness.overrides(),
-            allow_overrides=False,
-        )
-    )
-
-    # The refusal is recorded, never silently ignored — and nothing spawned.
-    assert final_status == "failed"
-    row = row_by_query(load_rows(worker_db, run_id), "q-a")
-    assert row.failure_class == "contract_violation"
-    assert "allow_overrides" in (row.failure_reason or "")
-    assert not (harness.evidence_root / str(run_id)).exists()
+    assert load_run(worker_db, fresh_running).status == "running"
+    assert load_run(worker_db, queued).status == "queued"
+    assert load_run(worker_db, terminal).status == "cancelled"
+    for run_id in (fresh_running, queued, terminal):
+        assert not [
+            event
+            for event in load_audit(worker_db, run_id)
+            if event.action == "discovery_run.reaped"
+        ]
 
 
 def test_invalid_query_id_charset_is_contract_violation(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
-    harness = StubHarness(tmp_path)
-    harness.add_doc("q-a", fixture_doc("q-a", "success"))
-    harness.add_doc("q-b", fixture_doc("q-b", "success"))
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-b", fixture_doc("q-b", "success"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    def call(qid: str) -> str:
-        return asyncio.run(
-            run_discovery_query(
-                None,
-                run_id=str(run_id),
-                correlation_id="corr-123",
-                query_id=qid,
-                overrides=harness.overrides(),
-                allow_overrides=True,
-            )
-        )
-
-    first = call("q-a")
-    hostile = call("../escape/id")
-    final_status = call("q-b")
+    first = invoke(run_id, "q-a")
+    invoke(run_id, "../escape/id")
+    final_status = invoke(run_id, "q-b")
 
     assert first == "running"
     # The hostile invocation is recorded but never satisfies the plan: only
@@ -683,11 +789,12 @@ def test_invalid_query_id_charset_is_contract_violation(
     assert "A-Za-z0-9_-" in (hostile_row.failure_reason or "")
     run = load_run(worker_db, run_id)
     assert run.metrics is not None
-    counts = run.metrics["counts"]
-    assert isinstance(counts, dict)
-    assert set(counts) == {"success"}  # the hostile row does not count
-    # The hostile id never reached the filesystem.
+    metrics_counts = run.metrics["counts"]
+    assert isinstance(metrics_counts, dict)
+    assert set(metrics_counts) == {"success"}  # the hostile row does not count
+    # The hostile id never reached either filesystem root.
     assert not list(harness.evidence_root.rglob("*escape*"))
+    assert not list(harness.input_root.rglob("*escape*"))
 
 
 def test_parse_iso_rejects_timezone_naive_timestamps() -> None:
@@ -706,40 +813,20 @@ def test_parse_iso_rejects_timezone_naive_timestamps() -> None:
 
 
 def test_midrun_replay_returns_running_without_respawning(
-    worker_db: str, tmp_path: Path
+    harness: StubHarness, worker_db: str
 ) -> None:
     """A redelivery while other queries are pending must not rerun the CLI."""
-    counter = tmp_path / "spawns.log"
-    stub = write_raw_stub(
-        tmp_path,
-        f'echo x >> "{counter}"\n'
-        'DOC="$OUT/../docs/$ID.json"\n'
-        'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
-        '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
-        'cat "$ATTEMPT_DIR/observation.json"\n'
-        "exit 0\n",
+    counter = harness.tmp_path / "spawns.log"
+    spawn_counting_tail = (
+        f'echo x >> "{counter}"\n' + DOCS_SERVING_TAIL
     )
-    overrides = raw_overrides(stub, tmp_path)
-    docs_dir = tmp_path / "docs"
-    docs_dir.mkdir(exist_ok=True)
-    (docs_dir / "q-a.json").write_text(json.dumps(fixture_doc("q-a", "success")))
-    (docs_dir / "q-b.json").write_text(json.dumps(fixture_doc("q-b", "blocked")))
+    harness.use_tail(spawn_counting_tail)
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    harness.write_doc("q-b", fixture_doc("q-b", "blocked"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
-    def call(qid: str) -> str:
-        return asyncio.run(
-            run_discovery_query(
-                None,
-                run_id=str(run_id),
-                correlation_id="corr-123",
-                query_id=qid,
-                overrides=overrides,
-                allow_overrides=True,
-            )
-        )
-
-    first = call("q-a")
-    replayed = call("q-a")
+    first = invoke(run_id, "q-a")
+    replayed = invoke(run_id, "q-a")
 
     assert first == "running"
     assert replayed == "running"
@@ -748,15 +835,16 @@ def test_midrun_replay_returns_running_without_respawning(
 
 
 def test_worker_settings_registers_the_plain_runner() -> None:
-    """The worker trusts settings alone: no overrides, one try, no results kept."""
-    import inspect
-
+    """The worker runs exactly the deployed configuration: no override channel."""
     from arq.connections import RedisSettings
 
     from app.discovery.worker import WorkerSettings
 
     assert WorkerSettings.functions == [run_discovery_query]
-    assert inspect.signature(run_discovery_query).parameters["allow_overrides"].default is False
+    parameters = inspect.signature(run_discovery_query).parameters
+    assert list(parameters) == ["ctx", "run_id", "correlation_id", "query_id"]
+    assert "overrides" not in parameters
+    assert "allow_overrides" not in parameters
     assert isinstance(WorkerSettings.redis_settings, RedisSettings)
     assert WorkerSettings.max_tries == 1
     assert WorkerSettings.keep_result == 0
