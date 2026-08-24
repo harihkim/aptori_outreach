@@ -22,9 +22,22 @@ export const OBSERVATION_STATUSES = [
 ] as const;
 /** Observation outcomes that still carry usable evidence. */
 export const USABLE_STATUSES = ['success', 'no_results', 'incomplete'] as const;
+/** Machine-readable failure classes for failed observations; null for native statuses. */
+export const FAILURE_CLASSES = [
+	'transport_error',
+	'transport_timeout',
+	'evidence_unreadable',
+	'evidence_unlocated',
+	'unknown_observation_schema',
+	'unknown_observation_status',
+	'contract_violation',
+	'runtime_verification_failed',
+	'wrapper_error'
+] as const;
 
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type ObservationStatus = (typeof OBSERVATION_STATUSES)[number];
+export type FailureClass = (typeof FAILURE_CLASSES)[number];
 
 export type PlanQueryBody = {
 	id: string;
@@ -109,8 +122,9 @@ export type ObservationBody = {
 	created_at: string;
 };
 
-export type ValidatedObservationBody = Omit<ObservationBody, 'status'> & {
+export type ValidatedObservationBody = Omit<ObservationBody, 'status' | 'failure_class'> & {
 	status: ObservationStatus;
+	failure_class: FailureClass | null;
 };
 
 export type Observation = {
@@ -118,7 +132,7 @@ export type Observation = {
 	queryId: string;
 	capability: string;
 	status: ObservationStatus;
-	failureClass: string | null;
+	failureClass: FailureClass | null;
 	failureReason: string | null;
 	providerVariant: string;
 	configSha256: string;
@@ -154,6 +168,10 @@ export function isRunStatus(value: string): value is RunStatus {
 
 export function isObservationStatus(value: string): value is ObservationStatus {
 	return (OBSERVATION_STATUSES as readonly string[]).includes(value);
+}
+
+export function isFailureClass(value: string): value is FailureClass {
+	return (FAILURE_CLASSES as readonly string[]).includes(value);
 }
 
 export function isStringList(value: unknown): value is string[] {

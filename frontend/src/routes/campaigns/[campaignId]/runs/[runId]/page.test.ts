@@ -219,7 +219,7 @@ describe('discovery run page', () => {
 			Page,
 			{
 				data: pageData(runBody({ status: 'partial' }), [
-					observation('blocked', 'rate_limited_by_provider'),
+					observation('blocked', 'wrapper_error'),
 					observation('success', null, 'q02-appsec-tools-broad')
 				])
 			}
@@ -228,7 +228,7 @@ describe('discovery run page', () => {
 		const table = screen.getByRole('table');
 		expect(within(table).getByText('q01-api-security-broad')).toBeInTheDocument();
 		expect(within(table).getByText('q02-appsec-tools-broad')).toBeInTheDocument();
-		expect(screen.getByText('rate_limited_by_provider')).toBeInTheDocument();
+		expect(screen.getByText('wrapper_error')).toBeInTheDocument();
 		expect(screen.getAllByText('the provider said no').length).toBeGreaterThan(0);
 		expect(screen.getAllByText('1.3 s').length).toBeGreaterThan(0);
 		expect(within(table).getByText('success')).toBeInTheDocument();
@@ -240,7 +240,7 @@ describe('discovery run page', () => {
 			Page,
 			{
 				data: pageData(runBody({ status: 'failed' }), [
-					observation('blocked', 'rate_limited_by_provider'),
+					observation('blocked', 'wrapper_error'),
 					observation('failed', 'transport_timeout'),
 					observation('failed', 'transport_timeout')
 				])
@@ -249,7 +249,7 @@ describe('discovery run page', () => {
 
 		const banner = screen.getByRole('alert');
 		expect(banner).toHaveTextContent('2 × transport_timeout');
-		expect(banner).toHaveTextContent('1 × rate_limited_by_provider');
+		expect(banner).toHaveTextContent('1 × wrapper_error');
 	});
 
 	it('polls with backoff while the run is live and the backend answers', async () => {

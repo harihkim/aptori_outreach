@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import statusesContractJson from '../../../contracts/discovery-run-statuses.json';
 
 import {
+	FAILURE_CLASSES,
 	OBSERVATION_STATUSES,
 	RUN_STATUSES,
 	USABLE_STATUSES,
@@ -22,6 +23,7 @@ type StatusesContract = {
 	runStatuses: string[];
 	observationStatuses: string[];
 	usableStatuses: string[];
+	failureClasses: string[];
 };
 
 const contract = statusesContractJson as StatusesContract;
@@ -88,6 +90,7 @@ describe('discovery status vocabulary', () => {
 		expect([...RUN_STATUSES]).toEqual(contract.runStatuses);
 		expect([...OBSERVATION_STATUSES]).toEqual(contract.observationStatuses);
 		expect([...USABLE_STATUSES]).toEqual(contract.usableStatuses);
+		expect([...FAILURE_CLASSES]).toEqual(contract.failureClasses);
 	});
 });
 
@@ -227,6 +230,41 @@ describe('parseObservationsResponse', () => {
 			httpStatus: 200,
 			body: {
 				items: [{ ...observationBody, status: 'fine_i_guess' }],
+				next_cursor: null
+			}
+		});
+		expect(state.items).toEqual([]);
+		expect(state.detail).toBe('Unexpected response (HTTP 200)');
+	});
+
+	it('maps every legal failure class and keeps null valid for native statuses', () => {
+		for (const failureClass of FAILURE_CLASSES) {
+			const state = parseObservationsResponse({
+				httpStatus: 200,
+				body: {
+					items: [{ ...observationBody, status: 'failed', failure_class: failureClass }],
+					next_cursor: null
+				}
+			});
+			expect(state.detail).toBeNull();
+			expect(state.items).toHaveLength(1);
+			expect(state.items[0].failureClass).toBe(failureClass);
+		}
+
+		const native = parseObservationsResponse({
+			httpStatus: 200,
+			body: { items: [observationBody], next_cursor: null }
+		});
+		expect(native.items[0].failureClass).toBeNull();
+	});
+
+	it('rejects an item with an out-of-vocabulary failure class instead of rendering it', () => {
+		const state = parseObservationsResponse({
+			httpStatus: 200,
+			body: {
+				items: [
+					{ ...observationBody, status: 'failed', failure_class: 'rate_limited_by_provider' }
+				],
 				next_cursor: null
 			}
 		});

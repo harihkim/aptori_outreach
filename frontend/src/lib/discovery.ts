@@ -1,4 +1,5 @@
 import {
+	isFailureClass,
 	isObservationStatus,
 	isRecord,
 	isRunStatus,
@@ -90,7 +91,8 @@ function isObservationBody(value: unknown): value is ValidatedObservationBody {
 		typeof value.capability === 'string' &&
 		typeof value.status === 'string' &&
 		isObservationStatus(value.status) &&
-		(value.failure_class === null || typeof value.failure_class === 'string') &&
+		(value.failure_class === null ||
+			(typeof value.failure_class === 'string' && isFailureClass(value.failure_class))) &&
 		(value.failure_reason === null || typeof value.failure_reason === 'string') &&
 		typeof value.provider_variant === 'string' &&
 		typeof value.config_sha256 === 'string' &&
