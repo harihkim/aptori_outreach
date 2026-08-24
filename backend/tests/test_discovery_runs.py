@@ -100,13 +100,13 @@ def start_run(api: TestClient, campaign_id: str, key: str | None = None) -> Any:
 
 
 class FakeEnqueue:
-    """Synchronous stand-in for the arq queue port."""
+    """Async stand-in for the arq queue port (the port is async-only)."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, list[str]]] = []
         self.fail_next = False
 
-    def __call__(self, run_id: object, correlation_id: str, query_ids: list[str]) -> None:
+    async def __call__(self, run_id: object, correlation_id: str, query_ids: list[str]) -> None:
         call: tuple[str, str, list[str]] = (str(run_id), correlation_id, list(query_ids))
         self.calls.append(call)
         if self.fail_next:
@@ -278,6 +278,10 @@ def test_service_rejects_principal_without_workspace_access(
 
     engine = create_engine(discovery_database_url)
     principal = Principal(actor="outsider", workspace_ids=frozenset())
+
+    async def refuse_enqueue(*args: object) -> None:
+        raise AssertionError("not reached")
+
     try:
         with Session(engine) as session:
             with pytest.raises(discovery_service.WorkspaceAccessDenied):
@@ -288,7 +292,7 @@ def test_service_rejects_principal_without_workspace_access(
                     uuid.uuid4(),
                     key="outsider-key",
                     plan_loader=lambda: (_ for _ in ()).throw(AssertionError("not reached")),
-                    enqueue=lambda *a: None,
+                    enqueue=refuse_enqueue,
                 )
     finally:
         engine.dispose()

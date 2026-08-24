@@ -43,6 +43,22 @@ RETRIEVAL_OBSERVATION_STATUSES = (
     "runtime_verification_failed",
     "failed",
 )
+# Canonical backend-classified failure taxonomy, persisted ONLY under
+# status='failed'; native document statuses keep failure_class NULL. The
+# database enforces this set via ck_retrieval_observations_failure_class_values
+# (migration 0009); contract JSON 'failureClasses' and the wire-schema Literal
+# must match exactly (parity-tested).
+FAILURE_CLASSES = (
+    "transport_error",
+    "transport_timeout",
+    "evidence_unreadable",
+    "evidence_unlocated",
+    "unknown_observation_schema",
+    "unknown_observation_status",
+    "contract_violation",
+    "runtime_verification_failed",
+    "wrapper_error",
+)
 # Currency-cost state for runs. The backend never prices retrieval: the only
 # honest state today is 'unpriced', and cost_usd stays null. Unmeasured usage
 # dimensions stay null too — never zero. Measured retrieval usage (wall time,

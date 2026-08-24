@@ -16,5 +16,16 @@
     "failed"
   ],
   "usableStatuses": ["success", "no_results", "incomplete"],
-  "costStatuses": ["unpriced"]
+  "costStatuses": ["unpriced"],
+  "failureClasses": [
+    "transport_error",
+    "transport_timeout",
+    "evidence_unreadable",
+    "evidence_unlocated",
+    "unknown_observation_schema",
+    "unknown_observation_status",
+    "contract_violation",
+    "runtime_verification_failed",
+    "wrapper_error"
+  ]
 }

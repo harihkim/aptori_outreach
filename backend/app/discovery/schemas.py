@@ -8,6 +8,20 @@ from pydantic import BaseModel, ConfigDict
 
 RunStatus = Literal["queued", "running", "succeeded", "partial", "failed", "cancelled"]
 
+# Canonical backend-classified failure taxonomy; mirrors models.FAILURE_CLASSES
+# and contracts/discovery-run-statuses.json 'failureClasses' (parity-tested).
+FailureClass = Literal[
+    "transport_error",
+    "transport_timeout",
+    "evidence_unreadable",
+    "evidence_unlocated",
+    "unknown_observation_schema",
+    "unknown_observation_status",
+    "contract_violation",
+    "runtime_verification_failed",
+    "wrapper_error",
+]
+
 
 class DiscoveryRunCreate(BaseModel):
     """Starting a run carries no options today; the body stays closed."""
@@ -55,7 +69,8 @@ class RetrievalObservationResponse(BaseModel):
     query_id: str
     capability: str
     status: str
-    failure_class: str | None
+    # No bare str passthrough: the wire only carries canonical classes.
+    failure_class: FailureClass | None
     failure_reason: str | None
     provider_variant: str
     config_sha256: str

@@ -871,6 +871,66 @@ def test_genuine_transport_failure_stays_transport_error(
     assert row.failure_class == "transport_error"
 
 
+def test_classification_outputs_stay_within_failure_class_vocabulary() -> None:
+    """Audit: every classifier path emits NULL or a canonical class only."""
+    from app.discovery.cli import CliResult
+    from app.discovery.models import FAILURE_CLASSES
+    from app.discovery.runner import _classify_result
+
+    valid = fixture_doc("q-x", "success")
+    bad_schema = fixture_doc("q-x", "success", schemaVersion=99)
+    bad_status = fixture_doc("q-x", "kind_of_fine")
+    oversized = fixture_doc("q-x", "success", observationId="x" * 300)
+    wrong_capability = fixture_doc("q-x", "success", capability="thread_fetch")
+
+    cases: list[tuple[CliResult, str | None]] = [
+        (
+            CliResult(exit_code=-1, stderr_tail="", timed_out=True),
+            "transport_timeout",
+        ),
+        (CliResult(exit_code=0, stderr_tail="", timed_out=False), "evidence_unlocated"),
+        (CliResult(exit_code=2, stderr_tail="boom", timed_out=False), "transport_error"),
+        (CliResult(exit_code=1, stderr_tail="plain crash", timed_out=False), "wrapper_error"),
+        (
+            CliResult(exit_code=1, stderr_tail="verifyRuntime failed", timed_out=False),
+            "runtime_verification_failed",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk_unreadable"),
+            "evidence_unreadable",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="no_evidence_pointer"),
+            "evidence_unlocated",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=bad_schema),
+            "unknown_observation_schema",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=bad_status),
+            "unknown_observation_status",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=oversized),
+            "contract_violation",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=wrong_capability),
+            "contract_violation",
+        ),
+        (
+            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=valid),
+            None,
+        ),
+    ]
+
+    for result, expected_class in cases:
+        outcome = _classify_result(result, Path("/tmp/evidence-out"), 10.0)
+        assert outcome.failure_class == expected_class
+        assert outcome.failure_class is None or outcome.failure_class in FAILURE_CLASSES
+
+
 def test_worker_settings_registers_the_plain_runner() -> None:
     """The worker runs exactly the deployed configuration: no override channel."""
     from arq.connections import RedisSettings

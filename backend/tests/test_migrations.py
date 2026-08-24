@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0008_observation_vocabulary"
+HEAD_REVISION = "0009_failure_class_vocabulary"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -281,6 +281,56 @@ def test_security_definer_purge_surface_is_gone_at_head(
             )
         ).scalar_one()
     assert functions == 0
+
+
+def test_failure_class_check_round_trips(migrated_test_database: str) -> None:
+    """0009: NULL stays legal for native statuses; junk classes are rejected."""
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.upgrade(alembic_cfg, "head")
+
+    engine = create_engine(migrated_test_database)
+
+    def _constraint_present() -> bool:
+        with engine.connect() as connection:
+            names = {
+                row[0]
+                for row in connection.execute(
+                    text(
+                        "SELECT conname FROM pg_constraint "
+                        "WHERE conname = "
+                        "'ck_retrieval_observations_failure_class_values'"
+                    )
+                )
+            }
+        return bool(names)
+
+    assert _constraint_present()
+
+    with engine.begin() as connection:
+        _seed_run_and_observation(connection)
+    assert observation_count(migrated_test_database) >= 1  # NULL class accepted
+
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO retrieval_observations "
+                    "(id, discovery_run_id, workspace_id, query_id, schema_version, "
+                    "capability, provider_variant, config_sha256, observation_id, "
+                    "status, failure_class, evidence_directory, correlation_id) "
+                    "VALUES ('00000000-0000-0000-0000-00000000000a', "
+                    "'00000000-0000-0000-0000-000000000008', :workspace, 'q-bogus', "
+                    "1, 'discovery', 'test-variant', :config, 'obs-bogus', 'failed', "
+                    "'totally_made_up_class', '/tmp/evidence/bogus', 'corr-bogus')"
+                ),
+                {"workspace": str(DEFAULT_WORKSPACE_ID), "config": "b" * 64},
+            )
+
+    command.downgrade(alembic_cfg, "0008_observation_vocabulary")
+    assert not _constraint_present()
+
+    command.upgrade(alembic_cfg, "head")
+    assert _constraint_present()
 
 
 def test_owner_purge_empties_table_and_restores_triggers(

@@ -37,6 +37,7 @@ from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.discovery import cli
 from app.discovery.models import (
+    FAILURE_CLASSES,
     RUN_COST_STATUSES,
     RUN_COST_UNPRICED,
     DiscoveryRun,
@@ -267,6 +268,13 @@ def _outcome_to_row(
     output_root: Path,
     outcome: _AttemptOutcome,
 ) -> RetrievalObservation:
+    # Vocabulary audit: a classifier can never smuggle an out-of-taxonomy
+    # failure class past this point (parity-checked down to the wire schema).
+    if outcome.failure_class is not None:
+        assert outcome.failure_class in FAILURE_CLASSES, (
+            f"classifier produced out-of-vocabulary failure_class "
+            f"{outcome.failure_class!r}"
+        )
     if outcome.doc is not None:
         return _document_observation(run, query_id, correlation_id, outcome.doc)
     return _unclassified_observation(

@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -33,7 +33,10 @@ OBSERVATION_CURSOR_NAMESPACE = "discovery-observations"
 QUERY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 PlanLoader = Callable[[], DiscoveryMethodPlan]
-Enqueue = Callable[[UUID, str, list[str]], object]
+# The production adapter (queue.enqueue_discovery_queries) is async; the port
+# is async-only by design — no sync-or-coroutine speculation. Coroutine is
+# required (not just Awaitable) because the service drives it via asyncio.run.
+Enqueue = Callable[[UUID, str, list[str]], Coroutine[Any, Any, object]]
 
 
 class WorkspaceAccessDenied(PermissionError):
@@ -212,13 +215,13 @@ def start_discovery_run(
     if "id" not in body:
         return result
     try:
-        pending = enqueue(
-            UUID(body["id"]),
-            body["correlation_id"],
-            [q["id"] for q in body["method_plan"]["queries"]],
+        asyncio.run(
+            enqueue(
+                UUID(body["id"]),
+                body["correlation_id"],
+                [q["id"] for q in body["method_plan"]["queries"]],
+            )
         )
-        if asyncio.iscoroutine(pending):
-            asyncio.run(pending)
     except Exception as error:
         raise WorkerQueueUnavailable(
             "the worker queue refused the run; retrying with the SAME key "

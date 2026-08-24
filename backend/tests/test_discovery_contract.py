@@ -74,6 +74,41 @@ def test_run_metrics_shape_is_pinned_for_frontend_consumers() -> None:
     assert list(RUN_COST_STATUSES) == [RUN_COST_UNPRICED]
 
 
+def test_failure_class_vocabulary_matches_every_layer(
+    migrated_test_database: str,
+) -> None:
+    """DB CHECK == ORM tuple == wire Literal == contract JSON, exactly."""
+    from typing import get_args as typing_get_args
+
+    from alembic.config import Config
+
+    from app.discovery.models import FAILURE_CLASSES
+    from app.discovery.schemas import FailureClass, RetrievalObservationResponse
+
+    alembic_cfg = Config("alembic.ini")
+    alembic_cfg.set_main_option("script_location", "alembic")
+    alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
+    command.upgrade(alembic_cfg, "head")
+
+    engine = create_engine(TEST_DATABASE_URL)
+    try:
+        with engine.connect() as connection:
+            db_classes = _head_check_values(
+                connection, "ck_retrieval_observations_failure_class_values"
+            )
+    finally:
+        engine.dispose()
+
+    contract = _contract()
+    assert db_classes == tuple(FAILURE_CLASSES)
+    assert list(typing_get_args(FailureClass)) == contract["failureClasses"]
+    # The wire response allows the Literal or NULL — never a bare str.
+    field_annotation = RetrievalObservationResponse.model_fields[
+        "failure_class"
+    ].annotation
+    assert typing_get_args(field_annotation) == (FailureClass, type(None))
+
+
 def _head_check_values(connection: Any, constraint_name: str) -> tuple[str, ...]:
     definition = connection.execute(
         text(
