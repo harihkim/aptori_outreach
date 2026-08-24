@@ -75,6 +75,21 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 		body: runResult.body
 	});
 
+	// The URL names the campaign too; a run belonging to another campaign
+	// must never render here as if it were this campaign's run.
+	if (runState.run && String(runState.run.campaignId) !== params.campaignId) {
+		return {
+			runState: { apiReachable: true, run: null, detail: 'Discovery run not found.' },
+			observationsState: {
+				apiReachable: false,
+				items: [],
+				nextCursor: null,
+				detail: 'Discovery run not found.'
+			},
+			params: { campaignId: params.campaignId, runId: params.runId }
+		};
+	}
+
 	const observationsResult = await callApi(
 		fetch,
 		'GET',

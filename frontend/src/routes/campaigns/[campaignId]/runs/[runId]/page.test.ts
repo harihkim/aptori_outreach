@@ -88,16 +88,35 @@ let observationCounter = 0;
 
 function pageData(
 	runBodyValue: DiscoveryRunBody,
-	items: unknown[] = []
+	items: unknown[] = [],
+	nextCursor: string | null = null
 ) {
 	const runState = parseDiscoveryRunResponse({ httpStatus: 200, body: runBodyValue });
 	const observationsState = parseObservationsResponse({
 		httpStatus: 200,
-		body: { items, next_cursor: null }
+		body: { items, next_cursor: nextCursor }
 	});
 	return {
 		runState,
 		observationsState,
+		params: {
+			campaignId: runBodyValue.campaign_id,
+			runId: runBodyValue.id
+		}
+	};
+}
+
+/** A transient outage after a previously successful poll of a live run. */
+function unreachablePageData(runBodyValue: DiscoveryRunBody) {
+	const { run } = parseDiscoveryRunResponse({ httpStatus: 200, body: runBodyValue });
+	return {
+		runState: { apiReachable: false, run, detail: 'Backend did not answer' },
+		observationsState: {
+			apiReachable: false,
+			items: [],
+			nextCursor: null,
+			detail: 'Backend did not answer'
+		},
 		params: {
 			campaignId: runBodyValue.campaign_id,
 			runId: runBodyValue.id
@@ -183,15 +202,48 @@ describe('discovery run page', () => {
 		expect(banner).toHaveTextContent('1 × rate_limited_by_provider');
 	});
 
-	it('polls every three seconds while the run is queued or running', async () => {
+	it('polls with backoff while the run is live and the backend answers', async () => {
 		vi.useFakeTimers();
 		render(Page, { data: pageData(runBody({ status: 'queued' })) });
 
 		await vi.advanceTimersByTimeAsync(3000);
-		await vi.advanceTimersByTimeAsync(3000);
+		await vi.advanceTimersByTimeAsync(6000);
 
 		expect(invalidate).toHaveBeenCalledTimes(2);
 		expect(invalidate).toHaveBeenCalledWith('app:discovery-run');
+	});
+
+	it('keeps polling an unreachable backend with growing backoff while the run is live', async () => {
+		vi.useFakeTimers();
+		render(Page, { data: unreachablePageData(runBody({ status: 'running' })) });
+
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+
+		// 3s -> 6s: nothing fires before the doubled delay elapses.
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(invalidate).toHaveBeenCalledTimes(2);
+
+		// 6s -> 12s -> capped at 15s.
+		await vi.advanceTimersByTimeAsync(12_000);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+		await vi.advanceTimersByTimeAsync(14_000);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(invalidate).toHaveBeenCalledTimes(4);
+		// The cap holds: 16 seconds yields exactly one further poll.
+		await vi.advanceTimersByTimeAsync(16_000);
+		expect(invalidate).toHaveBeenCalledTimes(5);
+	});
+
+	it('tells the operator the backend is unreachable instead of showing a dead end', async () => {
+		vi.useFakeTimers();
+		render(Page, { data: unreachablePageData(runBody({ status: 'running' })) });
+
+		const notice = screen.getByTestId('unreachable-retrying');
+		expect(notice).toHaveTextContent('Backend unreachable - retrying...');
 	});
 
 	it('stops polling once the run reaches a terminal status', async () => {
@@ -201,5 +253,39 @@ describe('discovery run page', () => {
 		await vi.advanceTimersByTimeAsync(9000);
 
 		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it('stops polling an unreachable backend once the last known status is terminal', async () => {
+		vi.useFakeTimers();
+		render(Page, { data: unreachablePageData(runBody({ status: 'failed' })) });
+
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it('says so when older observations are hidden behind a cursor', () => {
+		vi.useFakeTimers();
+		render(
+			Page,
+			{
+				data: pageData(
+					runBody({ status: 'partial' }),
+					[observation('success')],
+					'cursor-older-page'
+				)
+			}
+		);
+
+		expect(screen.getByTestId('older-observations')).toHaveTextContent(
+			'+ older observations hidden'
+		);
+	});
+
+	it('does not claim hidden observations when the page is complete', () => {
+		vi.useFakeTimers();
+		render(Page, { data: pageData(runBody({ status: 'partial' }), [observation('success')]) });
+
+		expect(screen.queryByTestId('older-observations')).not.toBeInTheDocument();
 	});
 });

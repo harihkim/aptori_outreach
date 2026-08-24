@@ -16,7 +16,16 @@
 
 	const run = $derived(data.runState.run);
 	const items = $derived(data.observationsState.items);
+	const hasOlderObservations = $derived(data.observationsState.nextCursor !== null);
 	const isLive = $derived(run?.status === 'queued' || run?.status === 'running');
+	// The backend may blip while a run executes; that must read as
+	// "retrying", not as a dead end.
+	const unreachableWhileLive = $derived(!data.runState.apiReachable && isLive);
+
+	const POLL_BASE_MS = 3000;
+	const POLL_MAX_MS = 15000;
+
+	let pollAttempts = $state(0);
 
 	const failureCounts = $derived.by(() => {
 		const counts = new Map<string, number>();
@@ -58,16 +67,28 @@
 		return latencyLabel(Number.isFinite(ms) && ms >= 0 ? ms : null);
 	}
 
-	// Poll only while the backend may still change the outcome; the cleanup
-	// return tears the interval down on status change or navigation.
+	// Poll only while the backend may still change the outcome; stop on
+	// terminal statuses. Each consecutive failed poll doubles the delay
+	// (3s -> 6s -> 12s -> capped at 15s); a successful answer resets it.
+	// The effect tracks pollAttempts itself: at the cap the recomputed delay
+	// is equal, but a new attempt still must reschedule a fresh timer.
+	$effect(() => {
+		if (data.runState.apiReachable) {
+			pollAttempts = 0;
+		}
+	});
+
 	$effect(() => {
 		if (!isLive) {
 			return;
 		}
-		const interval = setInterval(() => {
+		const attempts = pollAttempts;
+		const delay = Math.min(POLL_BASE_MS * 2 ** Math.min(attempts, 3), POLL_MAX_MS);
+		const timer = setTimeout(() => {
+			pollAttempts = attempts + 1;
 			void invalidate('app:discovery-run');
-		}, 3000);
-		return () => clearInterval(interval);
+		}, delay);
+		return () => clearTimeout(timer);
 	});
 </script>
 
@@ -93,7 +114,15 @@
 		</p>
 	</header>
 
-	{#if data.runState.detail}
+	{#if unreachableWhileLive}
+		<p
+			class="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
+			role="status"
+			data-testid="unreachable-retrying"
+		>
+			Backend unreachable - retrying...
+		</p>
+	{:else if data.runState.detail}
 		<p
 			class="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
 			role="alert"
@@ -213,6 +242,11 @@
 							{/each}
 						</tbody>
 					</table>
+				{/if}
+				{#if hasOlderObservations}
+					<p class="mt-3 text-sm text-muted-foreground" data-testid="older-observations">
+						+ older observations hidden
+					</p>
 				{/if}
 			</Card.Content>
 		</Card.Root>
