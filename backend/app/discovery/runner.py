@@ -67,6 +67,14 @@ RUNTIME_VERIFICATION_MARKERS = ("verifyRuntime", "Node version", "Obscura versio
 # The only capability this runner may record discovery evidence for.
 EXPECTED_CAPABILITY = "discovery"
 
+# Run-metrics shape consumed by the API and the frontend run screen. Pinned
+# by test_discovery_contract and test_worker_runner so key drift anywhere in
+# the stack fails deterministically; the frontend aligns to THIS shape.
+RUN_METRICS_KEYS = frozenset(
+    {"counts", "total_elapsed_ms", "cost_usd", "cost_status", "usage"}
+)
+RUN_USAGE_KEYS = frozenset({"request_count", "bytes_transferred"})
+
 
 @dataclass(frozen=True)
 class _AttemptConfig:
@@ -345,6 +353,18 @@ def _classify_result(
                 ),
             )
         return _AttemptOutcome(evidence_directory=str(doc.evidence_directory), doc=doc)
+
+    if result.evidence_source == "none" and result.exit_code == 0:
+        # Exit 0 with neither a readable disk document nor even a locatable
+        # stdout pointer is an honesty gap, not a transport failure.
+        return _AttemptOutcome(
+            evidence_directory=str(output_root),
+            failure_class="evidence_unlocated",
+            failure_reason=(
+                "retrieval CLI exited 0 without an observation.json on disk "
+                "and without a parsable evidenceDirectory pointer in stdout"
+            ),
+        )
 
     if result.exit_code == 1:
         if any(marker in result.stderr_tail for marker in RUNTIME_VERIFICATION_MARKERS):

@@ -55,6 +55,25 @@ def test_cost_vocabulary_is_unpriced_only() -> None:
     assert contract["costStatuses"] == list(RUN_COST_STATUSES)
 
 
+def test_run_metrics_shape_is_pinned_for_frontend_consumers() -> None:
+    """Run-metrics keys are contract surface; drift fails deterministically.
+
+    The frontend run screen consumes exactly this shape (metrics.usage
+    nesting included) and is being aligned to it, so both sides pin the
+    same key sets here via the runner's emitted-shape constants.
+    """
+    from app.discovery.models import RUN_COST_UNPRICED
+    from app.discovery.runner import RUN_METRICS_KEYS, RUN_USAGE_KEYS
+
+    assert RUN_METRICS_KEYS == frozenset(
+        {"counts", "total_elapsed_ms", "cost_usd", "cost_status", "usage"}
+    )
+    assert RUN_USAGE_KEYS == frozenset({"request_count", "bytes_transferred"})
+    # The cost_status key in the pinned shape carries only frozen vocabulary.
+    assert "cost_status" in RUN_METRICS_KEYS
+    assert list(RUN_COST_STATUSES) == [RUN_COST_UNPRICED]
+
+
 def _head_check_values(connection: Any, constraint_name: str) -> tuple[str, ...]:
     definition = connection.execute(
         text(

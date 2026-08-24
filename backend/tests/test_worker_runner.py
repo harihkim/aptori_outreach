@@ -301,6 +301,13 @@ def test_success_and_no_results_complete_the_run(harness: StubHarness, worker_db
     assert run.started_at is not None
     assert run.completed_at is not None
     assert run.metrics is not None
+    # Emitted shape must equal the pinned contract keys exactly (FINDING-2).
+    from app.discovery.runner import RUN_METRICS_KEYS, RUN_USAGE_KEYS
+
+    assert set(run.metrics) == RUN_METRICS_KEYS
+    usage = run.metrics["usage"]
+    assert isinstance(usage, dict)
+    assert set(usage) == RUN_USAGE_KEYS
     assert run.metrics["counts"] == {"no_results": 1, "success": 1}
     # Measured retrieval usage only: sums of what the attempts reported.
     assert run.metrics["total_elapsed_ms"] == 1500
@@ -832,6 +839,36 @@ def test_midrun_replay_returns_running_without_respawning(
     assert replayed == "running"
     assert counter.read_text().count("x") == 1
     assert len(load_rows(worker_db, run_id)) == 1
+
+
+def test_exit_zero_without_any_evidence_is_unlocated_not_transport(
+    harness: StubHarness, worker_db: str
+) -> None:
+    """Exit 0 without disk evidence or a pointer is an honesty gap."""
+    harness.use_tail('printf "not json at all"\nexit 0\n')
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    final_status = invoke(run_id, "q-x")
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unlocated"
+    assert "observation.json" in (row.failure_reason or "")
+
+
+def test_genuine_transport_failure_stays_transport_error(
+    harness: StubHarness, worker_db: str
+) -> None:
+    """A nonzero exit still classifies as transport_error, not unlocated."""
+    harness.use_tail('printf "not json at all"\nexit 7\n')
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    invoke(run_id, "q-x")
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "transport_error"
 
 
 def test_worker_settings_registers_the_plain_runner() -> None:
