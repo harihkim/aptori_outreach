@@ -1,64 +1,10 @@
-import { env } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import type { PageServerLoad } from './$types';
 
 import {
 	parseDiscoveryRunResponse,
 	parseObservationsResponse
 } from '$lib/discovery';
-
-const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
-
-type ApiResult = { ok: boolean; status: number; body: unknown };
-type ApiFetch = (
-	input: string | URL | Request,
-	init?: RequestInit
-) => Promise<Response>;
-
-async function callApi(
-	requestFetch: ApiFetch,
-	method: string,
-	path: string,
-	payload: unknown,
-	{
-		write = false,
-		timeoutMs = 5000,
-		idempotencyKey = crypto.randomUUID()
-	}: { write?: boolean; timeoutMs?: number; idempotencyKey?: string } = {}
-): Promise<ApiResult> {
-	const headers: Record<string, string> = { 'content-type': 'application/json' };
-	// Every request carries the deployment bearer token when configured;
-	// reads never carry an idempotency key because they cannot duplicate work.
-	if (env.API_TOKEN) {
-		headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
-	}
-	if (write) {
-		headers['Idempotency-Key'] = idempotencyKey;
-	}
-
-	async function attempt(): Promise<ApiResult> {
-		try {
-			const response = await requestFetch(`${apiBaseUrl}${path}`, {
-				method,
-				headers,
-				body: payload === null ? null : JSON.stringify(payload),
-				signal: AbortSignal.timeout(timeoutMs)
-			});
-			const body = await response.json().catch(() => null);
-			return { ok: response.ok, status: response.status, body };
-		} catch {
-			return { ok: false, status: 0, body: null };
-		}
-	}
-
-	const first = await attempt();
-	// One blind retry when the network failed: every request on this page is
-	// a read, so repeating it can never duplicate work.
-	if (!first.ok && first.status === 0) {
-		return attempt();
-	}
-	return first;
-}
+import { callApi } from '$lib/server/api';
 
 export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 	depends('app:discovery-run');

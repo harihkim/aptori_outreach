@@ -1,5 +1,3 @@
-import { env } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -14,60 +12,7 @@ import {
 	type Campaign
 } from '$lib/campaigns';
 import { discoverySubmissionId, explainDiscoveryError } from '$lib/discovery';
-
-const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
-
-type ApiResult = { ok: boolean; status: number; body: unknown };
-type ApiFetch = (
-	input: string | URL | Request,
-	init?: RequestInit
-) => Promise<Response>;
-
-async function callApi(
-	requestFetch: ApiFetch,
-	method: string,
-	path: string,
-	payload: unknown,
-	{
-		write = false,
-		timeoutMs = 5000,
-		idempotencyKey = crypto.randomUUID()
-	}: { write?: boolean; timeoutMs?: number; idempotencyKey?: string } = {}
-): Promise<ApiResult> {
-	const headers: Record<string, string> = { 'content-type': 'application/json' };
-	// Every request carries the deployment bearer token when configured;
-	// writes carry the caller's idempotency key so a retry of the same
-	// submission replays the original result instead of duplicating it.
-	if (env.API_TOKEN) {
-		headers['Authorization'] = `Bearer ${env.API_TOKEN}`;
-	}
-	if (write) {
-		headers['Idempotency-Key'] = idempotencyKey;
-	}
-
-	async function attempt(): Promise<ApiResult> {
-		try {
-			const response = await requestFetch(`${apiBaseUrl}${path}`, {
-				method,
-				headers,
-				body: payload === null ? null : JSON.stringify(payload),
-				signal: AbortSignal.timeout(timeoutMs)
-			});
-			const body = await response.json().catch(() => null);
-			return { ok: response.ok, status: response.status, body };
-		} catch {
-			return { ok: false, status: 0, body: null };
-		}
-	}
-
-	const first = await attempt();
-	// One same-key retry when the network failed: the write may have landed,
-	// and the key makes the retry safe either way.
-	if (write && !first.ok && first.status === 0) {
-		return attempt();
-	}
-	return first;
-}
+import { callApi, type ApiResult } from '$lib/server/api';
 
 function explain(result: ApiResult): string {
 	if (result.status === 0) {

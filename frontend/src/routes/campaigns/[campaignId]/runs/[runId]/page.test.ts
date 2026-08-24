@@ -140,9 +140,41 @@ describe('discovery run page', () => {
 		});
 
 		expect(screen.getByText('running')).toBeInTheDocument();
-		expect(screen.getByText('not reported')).toBeInTheDocument();
+		expect(screen.getByText('Not priced')).toBeInTheDocument();
+		expect(screen.getByText(/Currency cost:/)).toBeInTheDocument();
 		expect(screen.getByText('obscura-duckduckgo-lite@2026-08-21')).toBeInTheDocument();
 		expect(screen.getAllByText(/2 queries/).length).toBeGreaterThan(0);
+	});
+
+	it('shows measured retrieval usage next to latency without inventing zeros', () => {
+		render(
+			Page,
+			{
+				data: pageData(
+					runBody({
+						status: 'succeeded',
+						metrics: {
+							cost_status: 'unpriced',
+							cost_usd: null,
+							browser_wall_time_ms: 12340,
+							bytes_transferred: 1257438,
+							network_request_count: 37
+						}
+					})
+				)
+			}
+		);
+
+		expect(screen.getByText(/Measured usage:/)).toBeInTheDocument();
+		expect(
+			screen.getByText('Browser 12,340 ms · 1.2 MB · 37 requests')
+		).toBeInTheDocument();
+	});
+
+	it('leaves the usage line out entirely when nothing was measured', () => {
+		render(Page, { data: pageData(runBody()) });
+
+		expect(screen.queryByText(/Measured usage:/)).not.toBeInTheDocument();
 	});
 
 	it('lists the frozen queries in an expandable plan section', () => {

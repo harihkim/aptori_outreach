@@ -21,32 +21,31 @@ function createRequest(key: string): Request {
 }
 
 describe('campaign create action', () => {
-	it('retries one network failure with the same form-scoped key', async () => {
+	it('fails a write after a network failure without blind-retrying', async () => {
 		const requestFetch = vi
 			.fn()
-			.mockRejectedValueOnce(new TypeError('connection reset'))
-			.mockResolvedValueOnce(
-				new Response('{}', {
-					status: 201,
-					headers: { 'content-type': 'application/json' }
-				})
-			);
+			.mockRejectedValueOnce(new TypeError('connection reset'));
 		const create = actions.create;
 		if (create === undefined) {
 			throw new Error('create action is not registered');
 		}
 
-		const result = await create({
+		const result = (await create({
 			request: createRequest('stable-create-key'),
 			fetch: requestFetch
-		} as never);
-
-		expect(result).toEqual({ created: true });
-		expect(requestFetch).toHaveBeenCalledTimes(2);
-		for (const call of requestFetch.mock.calls) {
-			const headers = new Headers(call[1]?.headers);
-			expect(headers.get('Idempotency-Key')).toBe('stable-create-key');
+		} as never)) as { status?: number; data?: Record<string, unknown> } | undefined;
+		if (!result || !result.data) {
+			throw new Error('expected a fail() result');
 		}
+
+		expect(result.status).toBe(400);
+		expect(result.data.message).toBe('Backend did not answer.');
+		// Writes are attempted exactly once; the stable key rides back to the
+		// form so a deliberate resubmission replays instead of duplicating.
+		expect(requestFetch).toHaveBeenCalledTimes(1);
+		expect(result.data.idempotency_key).toBe('stable-create-key');
+		const headers = new Headers(requestFetch.mock.calls[0][1]?.headers);
+		expect(headers.get('Idempotency-Key')).toBe('stable-create-key');
 	});
 });
 

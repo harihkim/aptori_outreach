@@ -7,12 +7,15 @@ import {
 	RUN_STATUSES,
 	USABLE_STATUSES,
 	costLabel,
+	costStatusOf,
+	costStatusTone,
 	explainDiscoveryError,
 	latencyLabel,
 	observationTone,
 	parseDiscoveryRunResponse,
 	parseObservationsResponse,
-	runStatusTone
+	runStatusTone,
+	usageLabel
 } from '$lib/discovery';
 
 type StatusesContract = {
@@ -139,6 +142,21 @@ describe('parseDiscoveryRunResponse', () => {
 		});
 		expect(unknown.run).toBeNull();
 		expect(unknown.detail).toBe('Unexpected response (HTTP 200)');
+	});
+
+	it('passes run metrics through verbatim for formatters to read', () => {
+		const metrics = {
+			cost_status: 'unpriced',
+			cost_usd: null,
+			browser_wall_time_ms: 12340,
+			bytes_transferred: 1257438,
+			network_request_count: 37
+		};
+		const state = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: { ...runBody, metrics }
+		});
+		expect(state.run?.metrics).toEqual(metrics);
 	});
 
 	it('surfaces domain errors as operator guidance', () => {
@@ -272,15 +290,118 @@ describe('explainDiscoveryError', () => {
 });
 
 describe('costLabel', () => {
-	it('formats a numeric cost as USD', () => {
-		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 1.5 } })).toBe('$1.50');
+	it('formats a reported numeric cost as USD', () => {
+		expect(
+			costLabel({ ...runBodyView(), metrics: { cost_status: 'reported', cost_usd: 1.5 } })
+		).toBe('$1.50');
 	});
 
-	it('says honestly when cost was never reported', () => {
-		expect(costLabel({ ...runBodyView(), metrics: null })).toBe('not reported');
+	it('keeps rendering legacy numeric costs that predate cost_status', () => {
+		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0.75 } })).toBe('$0.75');
+	});
+
+	it('says honestly when currency cost was never priced', () => {
+		expect(costLabel({ ...runBodyView(), metrics: null })).toBe('Not priced');
 		expect(
 			costLabel({ ...runBodyView(), metrics: { cost_usd: 'unknown' } })
-		).toBe('not reported');
+		).toBe('Not priced');
+	});
+});
+
+describe('cost pricing states (P1-COST decision B)', () => {
+	it('renders zero as money and unpriced as explicitly not priced', () => {
+		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0 } })).toBe('$0.00');
+		expect(
+			costLabel({
+				...runBodyView(),
+				metrics: { cost_status: 'unpriced', cost_usd: null }
+			})
+		).toBe('Not priced');
+	});
+
+	it('treats legacy payloads without cost_status as unpriced, never zero', () => {
+		expect(costLabel({ ...runBodyView(), metrics: {} })).toBe('Not priced');
+		expect(costStatusOf({ ...runBodyView(), metrics: {} })).toBe('unpriced');
+		expect(costStatusOf({ ...runBodyView(), metrics: null })).toBe('unpriced');
+		expect(costStatusOf({ ...runBodyView(), metrics: { cost_status: 'mystery' } })).toBe(
+			'unpriced'
+		);
+	});
+
+	it('renders a reported price when the backend sends one, end to end', () => {
+		const run = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: { cost_status: 'reported', cost_usd: 0.42 }
+			}
+		}).run!;
+		expect(costStatusOf(run)).toBe('reported');
+		expect(costLabel(run)).toBe('$0.42');
+	});
+
+	it('never invents a price for a reported-but-null cost', () => {
+		expect(
+			costLabel({
+				...runBodyView(),
+				metrics: { cost_status: 'reported', cost_usd: null }
+			})
+		).toBe('Not priced');
+	});
+
+	it('maps every pricing state to a neutral tone, never error or warning', () => {
+		expect(costStatusTone('unpriced')).toBe('neutral');
+		expect(costStatusTone('reported')).toBe('neutral');
+	});
+});
+
+describe('usageLabel (measured retrieval usage)', () => {
+	it('joins every measured unit into one compact honest line', () => {
+		const run = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: {
+					cost_status: 'unpriced',
+					cost_usd: null,
+					browser_wall_time_ms: 12340,
+					bytes_transferred: 1257438,
+					network_request_count: 37
+				}
+			}
+		}).run!;
+		expect(usageLabel(run)).toBe('Browser 12,340 ms · 1.2 MB · 37 requests');
+	});
+
+	it('omits units the backend did not measure instead of showing zeros', () => {
+		const run = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: {
+					browser_wall_time_ms: null,
+					bytes_transferred: 2048,
+					network_request_count: null
+				}
+			}
+		}).run!;
+		expect(usageLabel(run)).toBe('2.0 KB');
+	});
+
+	it('returns nothing when nothing was measured at all', () => {
+		const allNull = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: {
+					browser_wall_time_ms: null,
+					bytes_transferred: null,
+					network_request_count: null
+				}
+			}
+		}).run!;
+		expect(usageLabel(allNull)).toBeNull();
+		expect(usageLabel({ ...runBodyView(), metrics: null })).toBeNull();
 	});
 });
 

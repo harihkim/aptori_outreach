@@ -7,6 +7,7 @@
 		latencyLabel,
 		observationTone,
 		runStatusTone,
+		usageLabel,
 		type Observation,
 		type Tone
 	} from '$lib/discovery';
@@ -154,7 +155,10 @@
 				<p>Started: <span class="font-medium">{shortDate(run.startedAt)}</span></p>
 				<p>Completed: <span class="font-medium">{shortDate(run.completedAt)}</span></p>
 				<p>Total latency: <span class="font-medium">{runLatency()}</span></p>
-				<p>Cost: <span class="font-medium">{costLabel(run)}</span></p>
+				{#if usageLabel(run)}
+					<p>Measured usage: <span class="font-medium">{usageLabel(run)}</span></p>
+				{/if}
+				<p>Currency cost: <span class="font-medium">{costLabel(run)}</span></p>
 			</Card.Content>
 		</Card.Root>
 
