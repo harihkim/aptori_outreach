@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +26,11 @@ from app.idempotency import service as idempotency
 from app.pagination import decode_cursor, encode_cursor
 
 OBSERVATION_CURSOR_NAMESPACE = "discovery-observations"
+
+# Query ids flow into filesystem paths and deterministic job ids; they stay
+# boring on purpose. The runner re-validates its kwarg against this exact
+# pattern before spawning anything.
+QUERY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 PlanLoader = Callable[[], DiscoveryMethodPlan]
 Enqueue = Callable[[UUID, str, list[str]], object]
@@ -79,6 +85,7 @@ def load_frozen_plan(
         raise RetrievalInputsInvalid("query document carries no queries list")
 
     queries: list[DiscoveryPlanQuery] = []
+    seen_ids: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict):
             raise RetrievalInputsInvalid("query entries must be JSON objects")
@@ -86,6 +93,13 @@ def load_frozen_plan(
         text = entry.get("query")
         if not isinstance(qid, str) or not qid:
             raise RetrievalInputsInvalid("query entry needs a non-empty string id")
+        if QUERY_ID_PATTERN.fullmatch(qid) is None:
+            raise RetrievalInputsInvalid(
+                f"query id {qid!r} must match ^[A-Za-z0-9_-]{{1,64}}$"
+            )
+        if qid in seen_ids:
+            raise RetrievalInputsInvalid(f"query id {qid!r} appears more than once in the plan")
+        seen_ids.add(qid)
         if not isinstance(text, str) or not text:
             raise RetrievalInputsInvalid(f"query {qid!r} needs a non-empty string query")
         pattern = entry.get("pattern")
@@ -175,6 +189,7 @@ def start_discovery_run(
             target_type="discovery_run",
             target_id=run.id,
             after={"status": run.status},
+            correlation_id=run.correlation_id,
         )
         return _run_result(session, run, status_code=201)
 

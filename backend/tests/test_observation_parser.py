@@ -194,3 +194,64 @@ def test_missing_evidence_directory_is_a_document_error() -> None:
 
     with pytest.raises(ValidationError):
         parse_observation(raw)
+
+
+def test_oversized_string_fields_are_document_errors() -> None:
+    """Bounded fields keep hostile or broken providers from ballooning rows."""
+    oversized_observation_id = golden_observation("success", observationId="x" * 201)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_observation_id)
+
+    oversized_url = golden_observation("success", sourceUrl="https://x.test/?q=" + "y" * 3000)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_url)
+
+    oversized_reason = golden_observation("blocked", failureReason="f" * 2001)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_reason)
+
+    oversized_evidence = golden_observation("success", evidenceDirectory="/e" * 513)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_evidence)
+
+    oversized_variant = golden_observation("success", providerVariant="v" * 201)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_variant)
+
+    oversized_sha = golden_observation("success", configSha256="a" * 65)
+    with pytest.raises(ValidationError):
+        parse_observation(oversized_sha)
+
+
+def test_field_bounds_accept_values_at_the_limit() -> None:
+    raw = golden_observation(
+        "success",
+        observationId="x" * 200,
+        sourceUrl="https://x.test/" + "y" * 2033,
+        evidenceDirectory="/e" * 512,
+        providerVariant="v" * 200,
+    )
+
+    doc = parse_observation(raw)
+
+    assert len(doc.observation_id) == 200
+    assert len(doc.evidence_directory) == 1024
+
+
+def test_redact_sensitive_text_masks_secrets_and_home_paths() -> None:
+    from app.discovery.observations import REDACTED_TEXT_LIMIT, redact_sensitive_text
+
+    masked = redact_sensitive_text(
+        "GET https://x.test/?jsc_orig_r=supersecret&ok=1 from /home/hari/evidence failed"
+    )
+    assert "supersecret" not in masked
+    assert "jsc_orig_r=<redacted>" in masked
+    assert "/home/hari" not in masked
+    assert "~/evidence" in masked
+    assert "ok=1" in masked
+
+    for key in ("solution", "js_challenge", "token", "jsc_orig_r"):
+        assert f"{key}=SECRET" not in redact_sensitive_text(f"{key}=SECRET")
+
+    capped = redact_sensitive_text("z" * (REDACTED_TEXT_LIMIT + 500))
+    assert len(capped) == REDACTED_TEXT_LIMIT

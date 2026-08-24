@@ -204,6 +204,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # INV-012 posture: a downgrade must never silently destroy immutable
+    # evidence. The table may only be dropped while it is empty; operators
+    # and tests have exactly one sanctioned purge: aptori_force_drop_observations()
+    # (added in 0007).
+    bind = op.get_bind()
+    observation_count = bind.execute(
+        sa.text("SELECT count(*) FROM retrieval_observations")
+    ).scalar_one()
+    if observation_count:
+        raise RuntimeError(
+            f"refusing to downgrade 0006_discovery_runs: retrieval_observations "
+            f"holds {observation_count} immutable row(s) (INV-012). Empty the "
+            "table first via aptori_force_drop_observations() if discarding "
+            "evidence is truly intended."
+        )
+
     op.execute(
         "DROP TRIGGER IF EXISTS suppress_retrieval_observation_update "
         "ON retrieval_observations"

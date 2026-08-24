@@ -15,29 +15,45 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.discovery.observations import redact_sensitive_text
+
 # Stderr is kept for failure classification but truncated so a chatty
-# provider cannot balloon a database row.
+# provider cannot balloon a database row. redact_sensitive_text applies the
+# tighter persistence cap before anything reaches the database.
 STDERR_TAIL_LIMIT = 4000
 
 
 @dataclass(frozen=True)
 class CliResult:
-    """Outcome of one retrieval CLI attempt."""
+    """Outcome of one retrieval CLI attempt.
+
+    evidence_unreadable means the authoritative on-disk observation.json
+    could not be read while stdout carried a parseable projection. The stdout
+    projection lacks schemaVersion guarantees, so it must never feed the full
+    parser; the runner records this outcome as an evidence failure instead of
+    trusting degraded stdout.
+    """
 
     exit_code: int
     observation_doc: dict[str, Any] | None
     stderr_tail: str
     timed_out: bool
+    evidence_unreadable: bool = False
 
 
-def _resolve_document(stdout_text: str) -> dict[str, Any] | None:
-    """Best-effort observation resolution: stdout first, disk as authority."""
+def _resolve_document(stdout_text: str) -> tuple[dict[str, Any] | None, bool]:
+    """Best-effort observation resolution: stdout first, disk as authority.
+
+    Returns (document, evidence_unreadable). When the on-disk observation
+    exists but cannot be read, the honest answer is no document plus the
+    unreadable flag — never the untrustworthy stdout projection.
+    """
     try:
         parsed = json.loads(stdout_text)
     except json.JSONDecodeError:
-        return None
+        return None, False
     if not isinstance(parsed, dict):
-        return None
+        return None, False
 
     evidence_directory = parsed.get("evidenceDirectory")
     if isinstance(evidence_directory, str) and evidence_directory:
@@ -45,10 +61,11 @@ def _resolve_document(stdout_text: str) -> dict[str, Any] | None:
         try:
             disk_doc = json.loads(disk_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return parsed
+            return None, True
         if isinstance(disk_doc, dict):
-            return disk_doc
-    return parsed
+            return disk_doc, False
+        return None, True
+    return parsed, False
 
 
 async def run_retrieval_cli(
@@ -100,11 +117,14 @@ async def run_retrieval_cli(
             process.kill()
         stdout_bytes, stderr_bytes = await process.communicate()
 
-    stderr_tail = stderr_bytes.decode("utf-8", errors="replace")[-STDERR_TAIL_LIMIT:]
+    stderr_tail = redact_sensitive_text(
+        stderr_bytes.decode("utf-8", errors="replace")[-STDERR_TAIL_LIMIT:]
+    )
 
     observation_doc: dict[str, Any] | None = None
+    evidence_unreadable = False
     if not timed_out:
-        observation_doc = _resolve_document(
+        observation_doc, evidence_unreadable = _resolve_document(
             stdout_bytes.decode("utf-8", errors="replace")
         )
 
@@ -113,4 +133,5 @@ async def run_retrieval_cli(
         observation_doc=observation_doc,
         stderr_tail=stderr_tail,
         timed_out=timed_out,
+        evidence_unreadable=evidence_unreadable,
     )

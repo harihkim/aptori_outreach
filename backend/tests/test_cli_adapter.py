@@ -167,3 +167,49 @@ def test_timeout_kills_process_and_reports(tmp_path: Path) -> None:
 
     assert result.timed_out is True
     assert result.observation_doc is None
+
+
+def test_unreadable_disk_document_never_trusts_stdout(tmp_path: Path) -> None:
+    """Garbage on disk plus a parseable stdout projection is evidence failure.
+
+    The stdout projection carries no schemaVersion guarantee, so the adapter
+    returns no document and flags the evidence as unreadable instead of
+    letting degraded stdout masquerade as authoritative.
+    """
+    stdout_doc = {
+        "status": "success",
+        "observationId": "attempt-q-1",
+        "evidenceDirectory": str(tmp_path / "evidence" / "attempts" / "attempt-q-1"),
+    }
+    stub = write_stub_node(
+        tmp_path,
+        body=f"""
+            printf 'garbage not json' > "$ATTEMPT_DIR/observation.json"
+            printf '%s' '{json.dumps(stdout_doc)}'
+            exit 0
+            """,
+    )
+
+    result = invoke(stub, tmp_path)
+
+    assert result.observation_doc is None
+    assert result.evidence_unreadable is True
+
+
+def test_stderr_tail_is_redacted_before_return(tmp_path: Path) -> None:
+    """Secrets and local usernames never survive into persisted stderr."""
+    stub = write_stub_node(
+        tmp_path,
+        body="""
+            echo 'GET https://x.test/?jsc_orig_r=supersecret&ok=1 from /home/hari/evidence failed' >&2
+            exit 1
+            """,
+    )
+
+    result = invoke(stub, tmp_path)
+
+    assert "supersecret" not in result.stderr_tail
+    assert "jsc_orig_r=<redacted>" in result.stderr_tail
+    assert "/home/hari" not in result.stderr_tail
+    assert "~/evidence" in result.stderr_tail
+    assert "ok=1" in result.stderr_tail  # non-sensitive values stay intact

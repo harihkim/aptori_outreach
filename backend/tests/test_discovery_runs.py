@@ -8,9 +8,11 @@ scoped to freshly generated ids. No trigger is ever bypassed.
 """
 
 import hashlib
+import json
 import re
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -446,3 +448,79 @@ def test_api_never_recomputes_metrics_from_direct_rows(
 
     assert detail["status"] == "queued"
     assert detail["metrics"] is None
+
+
+def _write_plan_files(
+    tmp_path: Path, queries: list[dict[str, object]]
+) -> tuple[Path, Path]:
+    document_path = tmp_path / "queries.json"
+    document_path.write_text(
+        json.dumps({"schemaVersion": 1, "queries": queries}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "provider-config.json"
+    config_path.write_text(
+        json.dumps({"providerVariant": "obscura-duckduckgo-lite"}), encoding="utf-8"
+    )
+    return document_path, config_path
+
+
+def test_load_frozen_plan_accepts_boring_unique_query_ids(tmp_path: Path) -> None:
+    document_path, config_path = _write_plan_files(
+        tmp_path,
+        [
+            {"id": "q01-api-security", "query": "API security"},
+            {"id": "q02-appsec-tools", "query": "application security"},
+        ],
+    )
+
+    plan = discovery_service.load_frozen_plan(document_path, config_path)
+
+    assert [q.id for q in plan.queries] == ["q01-api-security", "q02-appsec-tools"]
+
+
+def test_load_frozen_plan_rejects_hostile_query_id_charset(tmp_path: Path) -> None:
+    document_path, config_path = _write_plan_files(
+        tmp_path, [{"id": "../escape", "query": "path traversal"}]
+    )
+
+    with pytest.raises(discovery_service.RetrievalInputsInvalid, match="A-Za-z0-9_-"):
+        discovery_service.load_frozen_plan(document_path, config_path)
+
+
+def test_load_frozen_plan_rejects_oversized_query_ids(tmp_path: Path) -> None:
+    document_path, config_path = _write_plan_files(
+        tmp_path, [{"id": "x" * 65, "query": "too long"}]
+    )
+
+    with pytest.raises(discovery_service.RetrievalInputsInvalid, match="A-Za-z0-9_-"):
+        discovery_service.load_frozen_plan(document_path, config_path)
+
+
+def test_load_frozen_plan_rejects_duplicate_query_ids(tmp_path: Path) -> None:
+    document_path, config_path = _write_plan_files(
+        tmp_path,
+        [
+            {"id": "q-duplicate", "query": "first"},
+            {"id": "q-duplicate", "query": "second"},
+        ],
+    )
+
+    with pytest.raises(discovery_service.RetrievalInputsInvalid, match="more than once"):
+        discovery_service.load_frozen_plan(document_path, config_path)
+
+
+def test_discovery_run_created_audit_carries_correlation_id(
+    api: TestClient, fake_enqueue: FakeEnqueue, discovery_database_url: str
+) -> None:
+    body, campaign_id = started_run(api, fake_enqueue)
+
+    events = run_rows(
+        discovery_database_url,
+        "SELECT action, correlation_id FROM audit_events WHERE target_id = :id",
+        {"id": uuid.UUID(body["id"])},
+    )
+    created = [row for row in events if row.action == "discovery_run.created"]
+    assert len(created) == 1
+    assert created[0].correlation_id == body["correlation_id"]
+    del campaign_id

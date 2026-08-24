@@ -6,6 +6,7 @@ unknown schema versions and unknown statuses are rejected rather than coerced,
 because unknown evidence must never become valid domain state.
 """
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 OBSERVATION_SCHEMA_VERSION = 1
 
 # Wire values emitted by the frozen Node observation document. The database
-# enforces the same set via ck_retrieval_observations_status_values.
+# enforces a superset via ck_retrieval_observations_status_values: backend-
+# classified outcomes such as 'evidence_unreadable' are persisted with status
+# 'failed' and never arrive on this wire contract.
 STATUS_VALUES = (
     "success",
     "no_results",
@@ -39,31 +42,37 @@ class UnknownObservationStatus(ValueError):
 
 
 class ObservationDocument(BaseModel):
-    """Typed mirror of the frozen Node observation JSON."""
+    """Typed mirror of the frozen Node observation JSON.
+
+    Every string field carries an explicit bound so a hostile or broken
+    provider cannot balloon a database row: oversized values raise
+    ValidationError, which the runner classifies as a contract violation
+    instead of persisting unbounded wire data.
+    """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     schema_version: int = Field(alias="schemaVersion")
-    observation_id: str = Field(alias="observationId")
-    capability: str
-    provider_variant: str = Field(alias="providerVariant")
-    config_sha256: str = Field(alias="configSha256")
-    started_at: str = Field(alias="startedAt")
-    completed_at: str = Field(alias="completedAt")
+    observation_id: str = Field(alias="observationId", max_length=200)
+    capability: str = Field(max_length=64)
+    provider_variant: str = Field(alias="providerVariant", max_length=200)
+    config_sha256: str = Field(alias="configSha256", max_length=64)
+    started_at: str = Field(alias="startedAt", max_length=64)
+    completed_at: str = Field(alias="completedAt", max_length=64)
     elapsed_ms: int | None = Field(default=None, alias="elapsedMs")
-    status: str
-    failure_reason: str | None = Field(default=None, alias="failureReason")
+    status: str = Field(max_length=64)
+    failure_reason: str | None = Field(default=None, alias="failureReason", max_length=2000)
     input: dict[str, Any] | None = None
-    source_url: str | None = Field(default=None, alias="sourceUrl")
-    final_url: str | None = Field(default=None, alias="finalUrl")
+    source_url: str | None = Field(default=None, alias="sourceUrl", max_length=2048)
+    final_url: str | None = Field(default=None, alias="finalUrl", max_length=2048)
     response: dict[str, Any] | None = None
     raw_artifact: dict[str, Any] | None = Field(default=None, alias="rawArtifact")
-    normalized_sha256: str | None = Field(default=None, alias="normalizedSha256")
+    normalized_sha256: str | None = Field(default=None, alias="normalizedSha256", max_length=64)
     candidate_count: int | None = Field(default=None, alias="candidateCount")
     candidates: list[dict[str, Any]] | None = None
     network: dict[str, Any] | None = None
     runtime: dict[str, Any] | None = None
-    evidence_directory: str = Field(alias="evidenceDirectory")
+    evidence_directory: str = Field(alias="evidenceDirectory", max_length=1024)
 
 
 def parse_observation(raw: dict[str, Any]) -> ObservationDocument:
@@ -88,3 +97,29 @@ def parse_observation(raw: dict[str, Any]) -> ObservationDocument:
         )
 
     return ObservationDocument.model_validate(raw)
+
+
+# Persisted-text hygiene. Mirrors packages/obscura-retrieval/src/status.js
+# (reimplemented here in Python on purpose: the Node module is frozen and must
+# not become an import dependency of the backend).
+SENSITIVE_TEXT_PATTERN = re.compile(
+    r"((?:solution|js_challenge|token|jsc_orig_r)=)[^&\s:]*",
+    re.IGNORECASE,
+)
+HOME_PATH_PATTERN = re.compile(r"/home/[^/\s:]+")
+
+# Hard cap for anything this helper persists (failure reasons, stderr tails):
+# enough for diagnosis, far below anything that could balloon a row.
+REDACTED_TEXT_LIMIT = 500
+
+
+def redact_sensitive_text(value: str) -> str:
+    """Mask secrets and local usernames before text reaches the database.
+
+    Query-string values of sensitive keys are replaced with <redacted> exactly
+    like the retrieval CLI does, '/home/<user>' collapses to '~', and the
+    result is capped at REDACTED_TEXT_LIMIT characters.
+    """
+    masked = SENSITIVE_TEXT_PATTERN.sub(r"\1<redacted>", value)
+    masked = HOME_PATH_PATTERN.sub("~", masked)
+    return masked[:REDACTED_TEXT_LIMIT]

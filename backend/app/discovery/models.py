@@ -24,6 +24,8 @@ from app.orm import Base
 # enforces the same sets via CHECK constraints; the API layer validates first.
 DISCOVERY_RUN_STATUSES = ("queued", "running", "succeeded", "partial", "failed", "cancelled")
 OBSERVATION_CAPABILITIES = ("discovery", "thread_fetch")
+# Superset of observations.STATUS_VALUES: backend-classified outcomes such as
+# 'evidence_unreadable' are persisted here but never arrive on the Node wire.
 RETRIEVAL_OBSERVATION_STATUSES = (
     "success",
     "no_results",
@@ -37,6 +39,7 @@ RETRIEVAL_OBSERVATION_STATUSES = (
     "transport_failed",
     "runtime_verification_failed",
     "failed",
+    "evidence_unreadable",
 )
 
 
@@ -48,7 +51,10 @@ def _in_values(column: str, values: tuple[str, ...]) -> str:
 class DiscoveryRun(Base):
     __tablename__ = "discovery_runs"
     __table_args__ = (
-        CheckConstraint(_in_values("status", DISCOVERY_RUN_STATUSES), name="status_values"),
+        CheckConstraint(
+            _in_values("status", DISCOVERY_RUN_STATUSES),
+            name="ck_discovery_runs_status_values",
+        ),
         Index("ix_discovery_runs_campaign_creation_order", "campaign_id", "creation_order"),
     )
 
@@ -89,10 +95,12 @@ class RetrievalObservation(Base):
             "discovery_run_id", "query_id", name="uq_retrieval_observations_run_query"
         ),
         CheckConstraint(
-            _in_values("capability", OBSERVATION_CAPABILITIES), name="capability_values"
+            _in_values("capability", OBSERVATION_CAPABILITIES),
+            name="ck_retrieval_observations_capability_values",
         ),
         CheckConstraint(
-            _in_values("status", RETRIEVAL_OBSERVATION_STATUSES), name="status_values"
+            _in_values("status", RETRIEVAL_OBSERVATION_STATUSES),
+            name="ck_retrieval_observations_status_values",
         ),
         Index(
             "ix_retrieval_observations_run_creation_order",

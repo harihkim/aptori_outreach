@@ -12,6 +12,7 @@ import json
 import textwrap
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,8 @@ from app.auditing.models import AuditEvent
 from app.campaigns.models import Campaign
 from app.config import get_settings
 from app.discovery.models import DiscoveryRun, RetrievalObservation
-from app.discovery.runner import run_discovery_query
+from app.discovery.runner import _parse_iso, run_discovery_query
+from app.discovery.worker import reap_stale_running_runs
 from app.workspaces import DEFAULT_WORKSPACE_ID
 
 WORKER_DATABASE_NAME = "aptori_outreach_worker_test"
@@ -72,6 +74,11 @@ def write_stub_node(tmp_path: Path, docs_dir: Path, *, sleep_seconds: int | None
             'cat "$ATTEMPT_DIR/observation.json"\n'
             "exit 0\n"
         )
+    return write_raw_stub(tmp_path, f'DOCS="{docs_dir}"\n' + tail)
+
+
+def write_raw_stub(tmp_path: Path, tail: str) -> Path:
+    """Generate a fake node binary running an arbitrary bash tail."""
     stub = tmp_path / "fake-node.js"
     stub.write_text(
         textwrap.dedent(
@@ -90,8 +97,7 @@ def write_stub_node(tmp_path: Path, docs_dir: Path, *, sleep_seconds: int | None
             mkdir -p "$ATTEMPT_DIR"
             """
         )
-        + textwrap.dedent(f'DOCS="{docs_dir}"\n')
-        + tail
+        + textwrap.dedent(tail)
     )
     stub.chmod(0o755)
     return stub
@@ -196,8 +202,23 @@ def invoke(run_id: uuid.UUID, qid: str, harness: StubHarness) -> str:
             correlation_id="corr-123",
             query_id=qid,
             overrides=harness.overrides(),
+            allow_overrides=True,
         )
     )
+
+
+def raw_overrides(stub: Path, tmp_path: Path, *, timeout_seconds: float = 10) -> dict[str, object]:
+    """Spawn overrides pointing at an ad-hoc stub for classification tests."""
+    config_path = tmp_path / "provider-config.json"
+    if not config_path.exists():
+        config_path.write_text(json.dumps({"providerVariant": "stub"}))
+    return {
+        "node_bin": str(stub),
+        "cli_path": str(tmp_path / "retrieval-cli.js"),
+        "provider_config_path": str(config_path),
+        "evidence_root": str(tmp_path / "evidence-runs"),
+        "timeout_seconds": timeout_seconds,
+    }
 
 
 def load_run(database_url: str, run_id: uuid.UUID) -> DiscoveryRun:
@@ -347,10 +368,11 @@ def test_replay_same_query_does_not_duplicate_observation(
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
 
     first_status = invoke(run_id, "q-a", harness)
+    # The completed run is terminal, so a redelivery observes 'already_done'.
     second_status = invoke(run_id, "q-a", harness)
 
     assert first_status == "succeeded"
-    assert second_status == "succeeded"
+    assert second_status == "already_done"
     assert len(load_rows(worker_db, run_id)) == 1
     started_events = [
         event for event in load_audit(worker_db, run_id) if event.action == "discovery_run.started"
@@ -392,3 +414,359 @@ def test_timeout_classifies_transport_timeout(worker_db: str, tmp_path: Path) ->
     slow_row = row_by_query(load_rows(worker_db, run_id), "q-slow")
     assert slow_row.status == "failed"
     assert slow_row.failure_class == "transport_timeout"
+
+
+def test_wrapper_error_classified_from_plain_exit_one(worker_db: str, tmp_path: Path) -> None:
+    stub = write_raw_stub(tmp_path, 'echo "boom: wrapper crashed" >&2\nexit 1\n')
+    overrides = raw_overrides(stub, tmp_path)
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    final_status = asyncio.run(
+        run_discovery_query(
+            None,
+            run_id=str(run_id),
+            correlation_id="corr-123",
+            query_id="q-x",
+            overrides=overrides,
+            allow_overrides=True,
+        )
+    )
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "wrapper_error"
+
+
+def test_transport_error_classified_from_other_nonzero_exit(
+    worker_db: str, tmp_path: Path
+) -> None:
+    stub = write_raw_stub(tmp_path, 'echo "segfault-ish" >&2\nexit 2\n')
+    overrides = raw_overrides(stub, tmp_path)
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    asyncio.run(
+        run_discovery_query(
+            None,
+            run_id=str(run_id),
+            correlation_id="corr-123",
+            query_id="q-x",
+            overrides=overrides,
+            allow_overrides=True,
+        )
+    )
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.failure_class == "transport_error"
+
+
+def test_runtime_verification_marker_is_classified(worker_db: str, tmp_path: Path) -> None:
+    stub = write_raw_stub(
+        tmp_path, 'echo "Error: verifyRuntime failed: Node version too old" >&2\nexit 1\n'
+    )
+    overrides = raw_overrides(stub, tmp_path)
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    asyncio.run(
+        run_discovery_query(
+            None,
+            run_id=str(run_id),
+            correlation_id="corr-123",
+            query_id="q-x",
+            overrides=overrides,
+            allow_overrides=True,
+        )
+    )
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.failure_class == "runtime_verification_failed"
+
+
+def test_oversized_document_field_is_contract_violation(
+    worker_db: str, tmp_path: Path
+) -> None:
+    harness = StubHarness(tmp_path)
+    harness.add_doc("q-a", fixture_doc("q-a", "success", observationId="x" * 300))
+    harness.add_doc("q-b", fixture_doc("q-b", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
+
+    invoke(run_id, "q-a", harness)
+    final_status = invoke(run_id, "q-b", harness)
+
+    assert final_status == "partial"
+    bad_row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert bad_row.status == "failed"
+    assert bad_row.failure_class == "contract_violation"
+    assert bad_row.observation_id == f"{run_id}:q-a:unclassified"
+
+
+def test_unknown_observation_status_persists_classification(
+    worker_db: str, tmp_path: Path
+) -> None:
+    harness = StubHarness(tmp_path)
+    harness.add_doc("q-a", fixture_doc("q-a", "kind_of_fine"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
+
+    final_status = invoke(run_id, "q-a", harness)
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert row.status == "failed"
+    assert row.failure_class == "unknown_observation_status"
+
+
+def test_non_discovery_capability_is_contract_violation(
+    worker_db: str, tmp_path: Path
+) -> None:
+    harness = StubHarness(tmp_path)
+    harness.add_doc("q-a", fixture_doc("q-a", "success", capability="thread_fetch"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
+
+    final_status = invoke(run_id, "q-a", harness)
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert row.failure_class == "contract_violation"
+    assert "capability" in (row.failure_reason or "")
+
+
+def test_evidence_unreadable_beats_stdout_projection(
+    worker_db: str, tmp_path: Path
+) -> None:
+    """Garbage disk document plus a plausible stdout projection must fail.
+
+    The stdout projection lacks schemaVersion guarantees, so it can never
+    feed the full parser; the honest outcome is evidence_unreadable.
+    """
+    stub = write_raw_stub(
+        tmp_path,
+        'printf "garbage not json" > "$ATTEMPT_DIR/observation.json"\n'
+        'printf \'{"status":"success","observationId":"attempt-%s",'
+        '"evidenceDirectory":"%s"}\' "$ID" "$ATTEMPT_DIR"\n'
+        "exit 0\n",
+    )
+    overrides = raw_overrides(stub, tmp_path)
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    final_status = asyncio.run(
+        run_discovery_query(
+            None,
+            run_id=str(run_id),
+            correlation_id="corr-123",
+            query_id="q-x",
+            overrides=overrides,
+            allow_overrides=True,
+        )
+    )
+
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unreadable"
+
+
+def test_reaper_fails_stale_running_run(worker_db: str) -> None:
+    run_id = seed_run(worker_db, correlation_id="corr-reap", query_ids=["q-a"])
+    engine = create_engine(worker_db)
+    try:
+        with Session(engine) as session:
+            run = session.get(DiscoveryRun, run_id)
+            assert run is not None
+            run.status = "running"
+            run.started_at = datetime.now(UTC) - timedelta(hours=1)
+            session.commit()
+    finally:
+        engine.dispose()
+
+    # Append-only database: earlier suites may have left other stale rows,
+    # so only this run's own outcome may be asserted exactly.
+    reaped = asyncio.run(reap_stale_running_runs(None))
+    assert reaped >= 1
+
+    stale_run = load_run(worker_db, run_id)
+    assert stale_run.status == "failed"
+    assert stale_run.completed_at is not None
+    assert stale_run.metrics is not None
+    assert stale_run.metrics["reaped"] is True
+    events = load_audit(worker_db, run_id)
+    reaped_events = [event for event in events if event.action == "discovery_run.reaped"]
+    assert len(reaped_events) == 1
+    assert reaped_events[0].correlation_id == "corr-reap"
+    assert reaped_events[0].before == {"status": "running"}
+    assert reaped_events[0].after == {"status": "failed"}
+
+
+def test_reaper_leaves_fresh_runs_alone(worker_db: str) -> None:
+    run_id = seed_run(worker_db, correlation_id="corr-fresh", query_ids=["q-a"])
+    engine = create_engine(worker_db)
+    try:
+        with Session(engine) as session:
+            run = session.get(DiscoveryRun, run_id)
+            assert run is not None
+            run.status = "running"
+            run.started_at = datetime.now(UTC)
+            session.commit()
+    finally:
+        engine.dispose()
+
+    asyncio.run(reap_stale_running_runs(None))
+
+    fresh_run = load_run(worker_db, run_id)
+    assert fresh_run.status == "running"
+    assert fresh_run.metrics is None
+    reaped_events = [
+        event
+        for event in load_audit(worker_db, run_id)
+        if event.action == "discovery_run.reaped"
+    ]
+    assert reaped_events == []
+
+
+def test_overrides_are_refused_without_allow_overrides_flag(
+    worker_db: str, tmp_path: Path
+) -> None:
+    harness = StubHarness(tmp_path)
+    harness.add_doc("q-a", fixture_doc("q-a", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
+
+    final_status = asyncio.run(
+        run_discovery_query(
+            None,
+            run_id=str(run_id),
+            correlation_id="corr-123",
+            query_id="q-a",
+            overrides=harness.overrides(),
+            allow_overrides=False,
+        )
+    )
+
+    # The refusal is recorded, never silently ignored — and nothing spawned.
+    assert final_status == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert row.failure_class == "contract_violation"
+    assert "allow_overrides" in (row.failure_reason or "")
+    assert not (harness.evidence_root / str(run_id)).exists()
+
+
+def test_invalid_query_id_charset_is_contract_violation(
+    worker_db: str, tmp_path: Path
+) -> None:
+    harness = StubHarness(tmp_path)
+    harness.add_doc("q-a", fixture_doc("q-a", "success"))
+    harness.add_doc("q-b", fixture_doc("q-b", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
+
+    def call(qid: str) -> str:
+        return asyncio.run(
+            run_discovery_query(
+                None,
+                run_id=str(run_id),
+                correlation_id="corr-123",
+                query_id=qid,
+                overrides=harness.overrides(),
+                allow_overrides=True,
+            )
+        )
+
+    first = call("q-a")
+    hostile = call("../escape/id")
+    final_status = call("q-b")
+
+    assert first == "running"
+    # The hostile invocation is recorded but never satisfies the plan: only
+    # planned query ids rule the run, and both of those succeeded.
+    assert final_status == "succeeded"
+    rows = load_rows(worker_db, run_id)
+    assert len(rows) == 3
+    hostile_row = next(row for row in rows if row.query_id == "../escape/id")
+    assert hostile_row.failure_class == "contract_violation"
+    assert "A-Za-z0-9_-" in (hostile_row.failure_reason or "")
+    run = load_run(worker_db, run_id)
+    assert run.metrics is not None
+    counts = run.metrics["counts"]
+    assert isinstance(counts, dict)
+    assert set(counts) == {"success"}  # the hostile row does not count
+    # The hostile id never reached the filesystem.
+    assert not list(harness.evidence_root.rglob("*escape*"))
+
+
+def test_parse_iso_rejects_timezone_naive_timestamps() -> None:
+    aware = _parse_iso("2026-08-23T00:00:00Z")
+    assert aware is not None
+    assert aware.tzinfo is not None
+
+    naive = _parse_iso("2026-08-23T00:00:00")
+    assert naive is None
+
+    garbage = _parse_iso("not a timestamp")
+    assert garbage is None
+
+    absent = _parse_iso(None)
+    assert absent is None
+
+
+def test_midrun_replay_returns_running_without_respawning(
+    worker_db: str, tmp_path: Path
+) -> None:
+    """A redelivery while other queries are pending must not rerun the CLI."""
+    counter = tmp_path / "spawns.log"
+    stub = write_raw_stub(
+        tmp_path,
+        f'echo x >> "{counter}"\n'
+        'DOC="$OUT/../docs/$ID.json"\n'
+        'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
+        '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
+        'cat "$ATTEMPT_DIR/observation.json"\n'
+        "exit 0\n",
+    )
+    overrides = raw_overrides(stub, tmp_path)
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    (docs_dir / "q-a.json").write_text(json.dumps(fixture_doc("q-a", "success")))
+    (docs_dir / "q-b.json").write_text(json.dumps(fixture_doc("q-b", "blocked")))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
+
+    def call(qid: str) -> str:
+        return asyncio.run(
+            run_discovery_query(
+                None,
+                run_id=str(run_id),
+                correlation_id="corr-123",
+                query_id=qid,
+                overrides=overrides,
+                allow_overrides=True,
+            )
+        )
+
+    first = call("q-a")
+    replayed = call("q-a")
+
+    assert first == "running"
+    assert replayed == "running"
+    assert counter.read_text().count("x") == 1
+    assert len(load_rows(worker_db, run_id)) == 1
+
+
+def test_worker_settings_registers_the_plain_runner() -> None:
+    """The worker trusts settings alone: no overrides, one try, no results kept."""
+    import inspect
+
+    from arq.connections import RedisSettings
+
+    from app.discovery.worker import WorkerSettings
+
+    assert WorkerSettings.functions == [run_discovery_query]
+    assert inspect.signature(run_discovery_query).parameters["allow_overrides"].default is False
+    assert isinstance(WorkerSettings.redis_settings, RedisSettings)
+    assert WorkerSettings.max_tries == 1
+    assert WorkerSettings.keep_result == 0
+    assert WorkerSettings.job_timeout == (
+        get_settings().retrieval_attempt_timeout_seconds + 60
+    )
+
+    cron_jobs = WorkerSettings.cron_jobs
+    assert [job.coroutine for job in cron_jobs] == [reap_stale_running_runs]
+    reaper_cron = cron_jobs[0]
+    minutes = reaper_cron.minute
+    assert isinstance(minutes, set)
+    assert sorted(minutes) == list(range(0, 60, 5))  # every 300 seconds

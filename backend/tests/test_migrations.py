@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0006_discovery_runs"
+HEAD_REVISION = "0007_observation_hardening"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -22,6 +22,11 @@ def _alembic_config(database_url: str) -> Config:
 
 def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database: str) -> None:
     alembic_cfg = _alembic_config(migrated_test_database)
+
+    # A previous suite may have left immutable evidence behind; only the
+    # sanctioned purge may empty the table before a full round trip.
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(text("SELECT aptori_force_drop_observations()"))
 
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
@@ -156,7 +161,8 @@ def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
         text(
             "INSERT INTO campaigns "
             "(id, workspace_id, name, promotion_posture) "
-            "VALUES (:id, :workspace, 'discovery-immutability', 'expertise_first')"
+            "VALUES (:id, :workspace, 'discovery-immutability', 'expertise_first') "
+            "ON CONFLICT (id) DO NOTHING"
         ),
         {"id": campaign_id, "workspace": str(DEFAULT_WORKSPACE_ID)},
     )
@@ -164,7 +170,8 @@ def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
         text(
             "INSERT INTO discovery_runs "
             "(id, workspace_id, campaign_id, status, method_plan, correlation_id) "
-            "VALUES (:id, :workspace, :campaign, 'succeeded', '{}'::jsonb, 'corr-immutable')"
+            "VALUES (:id, :workspace, :campaign, 'succeeded', '{}'::jsonb, 'corr-immutable') "
+            "ON CONFLICT (id) DO NOTHING"
         ),
         {
             "id": run_id,
@@ -179,7 +186,8 @@ def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
             "provider_variant, config_sha256, observation_id, status, evidence_directory, "
             "correlation_id) "
             "VALUES (:id, :run, :workspace, 'q-1', 1, 'discovery', 'test-variant', :config, "
-            "'obs-1', 'success', '/tmp/evidence/obs-1', 'corr-immutable')"
+            "'obs-1', 'success', '/tmp/evidence/obs-1', 'corr-immutable') "
+            "ON CONFLICT (id) DO NOTHING"
         ),
         {
             "id": observation_id,
@@ -219,11 +227,66 @@ def test_retrieval_observations_reject_update_and_delete_at_sql_level(
     assert row.status == "success"
 
 
+def test_truncate_is_rejected_by_guard_trigger(migrated_test_database: str) -> None:
+    engine = create_engine(migrated_test_database)
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(text("TRUNCATE retrieval_observations"))
+
+
+def test_force_drop_observations_empties_table_and_restores_triggers(
+    migrated_test_database: str,
+) -> None:
+    """The single sanctioned escape hatch: empty table, guards back on."""
+    engine = create_engine(migrated_test_database)
+    # Start from a clean table regardless of what earlier tests left behind.
+    with engine.begin() as connection:
+        connection.execute(text("SELECT aptori_force_drop_observations()"))
+
+    with engine.begin() as connection:
+        _seed_run_and_observation(connection)
+        count = connection.execute(
+            text("SELECT count(*) FROM retrieval_observations")
+        ).scalar_one()
+        assert count == 1
+
+    with engine.begin() as connection:
+        connection.execute(text("SELECT aptori_force_drop_observations()"))
+
+    with engine.connect() as connection:
+        count = connection.execute(
+            text("SELECT count(*) FROM retrieval_observations")
+        ).scalar_one()
+        assert count == 0
+
+    # The row triggers are re-enabled after the purge.
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            _seed_run_and_observation(connection)
+            connection.execute(
+                text(
+                    "UPDATE retrieval_observations SET status = 'failed' "
+                    "WHERE id = '00000000-0000-0000-0000-000000000009'"
+                )
+            )
+
+
 def test_discovery_migration_round_trips_through_previous_revision(
     migrated_test_database: str,
 ) -> None:
     alembic_cfg = _alembic_config(migrated_test_database)
 
+    # Immutable evidence blocks the downgrade until it is sanctioned away.
+    with create_engine(migrated_test_database).begin() as connection:
+        _seed_run_and_observation(connection)
+    with create_engine(migrated_test_database).connect() as connection:
+        rows = connection.execute(text("SELECT count(*) FROM retrieval_observations")).scalar_one()
+        assert rows >= 1
+    with pytest.raises(RuntimeError, match="retrieval_observations"):
+        command.downgrade(alembic_cfg, "0005_stable_page_order")
+
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(text("SELECT aptori_force_drop_observations()"))
     command.downgrade(alembic_cfg, "0005_stable_page_order")
 
     with create_engine(migrated_test_database).connect() as connection:
