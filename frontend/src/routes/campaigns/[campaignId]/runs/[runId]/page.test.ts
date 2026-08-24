@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 
 import { cleanup, render, screen, within } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$app/navigation', () => ({ invalidate: vi.fn().mockResolvedValue(undefined) }));
@@ -263,6 +264,66 @@ describe('discovery run page', () => {
 		expect(invalidate).toHaveBeenCalledWith('app:discovery-run');
 	});
 
+	it('follows the exact backoff ladder 3s, 6s, 12s, then caps at 15s', async () => {
+		vi.useFakeTimers();
+		render(Page, { data: pageData(runBody({ status: 'running' })) });
+
+		await vi.advanceTimersByTimeAsync(2999);
+		expect(invalidate).toHaveBeenCalledTimes(0);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(5999);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(11_999);
+		expect(invalidate).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+
+		await vi.advanceTimersByTimeAsync(14_999);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(4);
+
+		// The cap holds thereafter: each further window yields one poll.
+		for (let expected = 4; expected <= 6; expected += 1) {
+			await vi.advanceTimersByTimeAsync(14_999);
+			expect(invalidate).toHaveBeenCalledTimes(expected);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(invalidate).toHaveBeenCalledTimes(expected + 1);
+		}
+	});
+
+	it('restarts the backoff at 3s once a poll succeeds again after failures', async () => {
+		vi.useFakeTimers();
+		const { rerender } = render(Page, { data: unreachablePageData(runBody({ status: 'running' })) });
+
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(6000);
+		expect(invalidate).toHaveBeenCalledTimes(2);
+
+		// The backend answers again: flip to a reachable payload mid-backoff.
+		rerender({ data: pageData(runBody({ status: 'running' })) });
+		flushSync();
+
+		// The next poll comes exactly 3s after the success, not on the old
+		// doubled delay (which was still ~12s out).
+		await vi.advanceTimersByTimeAsync(2999);
+		expect(invalidate).toHaveBeenCalledTimes(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+
+		// Afterwards the ladder resumes from the fresh counter: 6s next.
+		await vi.advanceTimersByTimeAsync(5999);
+		expect(invalidate).toHaveBeenCalledTimes(3);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(invalidate).toHaveBeenCalledTimes(4);
+	});
+
 	it('keeps polling an unreachable backend with growing backoff while the run is live', async () => {
 		vi.useFakeTimers();
 		render(Page, { data: unreachablePageData(runBody({ status: 'running' })) });
@@ -303,6 +364,34 @@ describe('discovery run page', () => {
 		await vi.advanceTimersByTimeAsync(9000);
 
 		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it('cancels the pending poll when a live run flips to a terminal status', async () => {
+		vi.useFakeTimers();
+		const { rerender } = render(Page, { data: pageData(runBody({ status: 'queued' })) });
+
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+
+		rerender({ data: pageData(runBody({ status: 'succeeded' })) });
+		flushSync();
+
+		// The 6s follow-up timer was torn down with the live chain.
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears the pending timer on unmount so no further polls fire', async () => {
+		vi.useFakeTimers();
+		const { unmount } = render(Page, { data: pageData(runBody({ status: 'running' })) });
+
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+
+		unmount();
+		await vi.advanceTimersByTimeAsync(30_000);
+
+		expect(invalidate).toHaveBeenCalledTimes(1);
 	});
 
 	it('stops polling an unreachable backend once the last known status is terminal', async () => {

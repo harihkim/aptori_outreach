@@ -11,7 +11,9 @@
 		type Observation,
 		type Tone
 	} from '$lib/discovery';
+	import type { Attachment } from 'svelte/attachments';
 	import type { PageData } from './$types';
+	import { startDiscoveryRunPolling } from './polling';
 
 	let { data }: { data: PageData } = $props();
 
@@ -23,20 +25,15 @@
 	// "retrying", not as a dead end.
 	const unreachableWhileLive = $derived(!data.runState.apiReachable && isLive);
 
-	const POLL_BASE_MS = 3000;
-	const POLL_MAX_MS = 15000;
-
-	let pollAttempts = $state(0);
-
 	const failureCounts = $derived.by(() => {
-		const counts = new Map<string, number>();
+		const counts: Record<string, number> = Object.create(null);
 		for (const item of items) {
 			if (!item.failureClass) {
 				continue;
 			}
-			counts.set(item.failureClass, (counts.get(item.failureClass) ?? 0) + 1);
+			counts[item.failureClass] = (counts[item.failureClass] ?? 0) + 1;
 		}
-		return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+		return Object.entries(counts).sort((a, b) => b[1] - a[1]);
 	});
 
 	function toneVariant(tone: Tone): 'destructive' | 'outline' {
@@ -68,36 +65,24 @@
 		return latencyLabel(Number.isFinite(ms) && ms >= 0 ? ms : null);
 	}
 
-	// Poll only while the backend may still change the outcome; stop on
-	// terminal statuses. Each consecutive failed poll doubles the delay
-	// (3s -> 6s -> 12s -> capped at 15s); a successful answer resets it.
-	// The effect tracks pollAttempts itself: at the cap the recomputed delay
-	// is equal, but a new attempt still must reschedule a fresh timer.
-	$effect(() => {
-		if (data.runState.apiReachable) {
-			pollAttempts = 0;
-		}
-	});
-
-	$effect(() => {
-		if (!isLive) {
-			return;
-		}
-		const attempts = pollAttempts;
-		const delay = Math.min(POLL_BASE_MS * 2 ** Math.min(attempts, 3), POLL_MAX_MS);
-		const timer = setTimeout(() => {
-			pollAttempts = attempts + 1;
-			void invalidate('app:discovery-run');
-		}, delay);
-		return () => clearTimeout(timer);
-	});
+	// The attachment re-runs whenever reachability or liveness changes,
+	// tearing down the previous chain; each fresh chain starts its local
+	// attempt counter at zero, so a reachable backend resets the backoff,
+	// a terminal status never schedules, and unmount clears the timer.
+	const attachPolling: Attachment = () =>
+		startDiscoveryRunPolling(
+			() => ({ live: isLive, reachable: data.runState.apiReachable }),
+			() => {
+				void invalidate('app:discovery-run');
+			}
+		);
 </script>
 
 <svelte:head>
 	<title>Discovery run · aptori outreach</title>
 </svelte:head>
 
-<div class="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6">
+<div class="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6" {@attach attachPolling}>
 	<header class="flex flex-col gap-1">
 		<div class="flex items-center justify-between gap-3">
 			<h1 class="text-2xl font-semibold tracking-tight">Discovery run</h1>
@@ -167,7 +152,7 @@
 				<Card.Title>Method plan</Card.Title>
 				<Card.Description>
 					<span data-testid="plan-provider">{run.methodPlan.providerVariant}</span>
-					{' '}
+					&#32;
 					<span data-testid="plan-query-count">{run.methodPlan.queries.length} queries</span>
 				</Card.Description>
 			</Card.Header>
@@ -178,7 +163,7 @@
 						{#each run.methodPlan.queries as query (query.id)}
 							<li class="text-sm">
 								<span class="font-mono">{query.id}</span>
-								{' — '}
+								&#32;—&#32;
 								<span>{query.query}</span>
 							</li>
 						{/each}
