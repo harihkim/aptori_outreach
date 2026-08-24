@@ -156,6 +156,27 @@ describe('discovery run page', () => {
 						metrics: {
 							cost_status: 'unpriced',
 							cost_usd: null,
+							usage: { request_count: 37, bytes_transferred: 1257438 }
+						}
+					})
+				)
+			}
+		);
+
+		expect(screen.getByText(/Measured usage:/)).toBeInTheDocument();
+		expect(
+			screen.getByText('37 requests · 1.2 MB')
+		).toBeInTheDocument();
+	});
+
+	it('renders no usage line for the retired top-level metric shape', () => {
+		render(
+			Page,
+			{
+				data: pageData(
+					runBody({
+						status: 'succeeded',
+						metrics: {
 							browser_wall_time_ms: 12340,
 							bytes_transferred: 1257438,
 							network_request_count: 37
@@ -165,10 +186,7 @@ describe('discovery run page', () => {
 			}
 		);
 
-		expect(screen.getByText(/Measured usage:/)).toBeInTheDocument();
-		expect(
-			screen.getByText('Browser 12,340 ms · 1.2 MB · 37 requests')
-		).toBeInTheDocument();
+		expect(screen.queryByText(/Measured usage:/)).not.toBeInTheDocument();
 	});
 
 	it('leaves the usage line out entirely when nothing was measured', () => {

@@ -27,7 +27,6 @@ export {
 	type CostStatus
 } from './discovery-format';
 export {
-	costStatusTone,
 	observationTone,
 	runStatusTone,
 	type Tone

@@ -8,7 +8,6 @@ import {
 	USABLE_STATUSES,
 	costLabel,
 	costStatusOf,
-	costStatusTone,
 	explainDiscoveryError,
 	latencyLabel,
 	observationTone,
@@ -148,9 +147,7 @@ describe('parseDiscoveryRunResponse', () => {
 		const metrics = {
 			cost_status: 'unpriced',
 			cost_usd: null,
-			browser_wall_time_ms: 12340,
-			bytes_transferred: 1257438,
-			network_request_count: 37
+			usage: { request_count: 37, bytes_transferred: 1257438 }
 		};
 		const state = parseDiscoveryRunResponse({
 			httpStatus: 200,
@@ -296,8 +293,10 @@ describe('costLabel', () => {
 		).toBe('$1.50');
 	});
 
-	it('keeps rendering legacy numeric costs that predate cost_status', () => {
-		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0.75 } })).toBe('$0.75');
+	it('reads legacy payloads without cost_status as not priced, never money', () => {
+		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0.75 } })).toBe(
+			'Not priced'
+		);
 	});
 
 	it('says honestly when currency cost was never priced', () => {
@@ -306,15 +305,42 @@ describe('costLabel', () => {
 			costLabel({ ...runBodyView(), metrics: { cost_usd: 'unknown' } })
 		).toBe('Not priced');
 	});
+
+	it('never renders a dollar figure for an unknown status word', () => {
+		expect(
+			costLabel({
+				...runBodyView(),
+				metrics: { cost_status: 'mystery', cost_usd: 4.2 }
+			})
+		).toBe('Not priced');
+		expect(costStatusOf({ ...runBodyView(), metrics: { cost_status: 'mystery' } })).toBe(
+			'unpriced'
+		);
+	});
+
+	it('treats unknown status with a null cost as not priced', () => {
+		expect(
+			costLabel({
+				...runBodyView(),
+				metrics: { cost_status: 'mystery', cost_usd: null }
+			})
+		).toBe('Not priced');
+	});
 });
 
 describe('cost pricing states (P1-COST decision B)', () => {
-	it('renders zero as money and unpriced as explicitly not priced', () => {
-		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0 } })).toBe('$0.00');
+	it('never reads an unpriced run as free, even at zero', () => {
+		expect(costLabel({ ...runBodyView(), metrics: { cost_usd: 0 } })).toBe('Not priced');
 		expect(
 			costLabel({
 				...runBodyView(),
 				metrics: { cost_status: 'unpriced', cost_usd: null }
+			})
+		).toBe('Not priced');
+		expect(
+			costLabel({
+				...runBodyView(),
+				metrics: { cost_status: 'unpriced', cost_usd: 0 }
 			})
 		).toBe('Not priced');
 	});
@@ -348,11 +374,6 @@ describe('cost pricing states (P1-COST decision B)', () => {
 			})
 		).toBe('Not priced');
 	});
-
-	it('maps every pricing state to a neutral tone, never error or warning', () => {
-		expect(costStatusTone('unpriced')).toBe('neutral');
-		expect(costStatusTone('reported')).toBe('neutral');
-	});
 });
 
 describe('usageLabel (measured retrieval usage)', () => {
@@ -364,28 +385,31 @@ describe('usageLabel (measured retrieval usage)', () => {
 				metrics: {
 					cost_status: 'unpriced',
 					cost_usd: null,
-					browser_wall_time_ms: 12340,
-					bytes_transferred: 1257438,
-					network_request_count: 37
+					usage: { request_count: 37, bytes_transferred: 1257438 }
 				}
 			}
 		}).run!;
-		expect(usageLabel(run)).toBe('Browser 12,340 ms · 1.2 MB · 37 requests');
+		expect(usageLabel(run)).toBe('37 requests · 1.2 MB');
 	});
 
 	it('omits units the backend did not measure instead of showing zeros', () => {
-		const run = parseDiscoveryRunResponse({
+		const bytesOnly = parseDiscoveryRunResponse({
 			httpStatus: 200,
 			body: {
 				...runBody,
-				metrics: {
-					browser_wall_time_ms: null,
-					bytes_transferred: 2048,
-					network_request_count: null
-				}
+				metrics: { usage: { request_count: null, bytes_transferred: 2048 } }
 			}
 		}).run!;
-		expect(usageLabel(run)).toBe('2.0 KB');
+		expect(usageLabel(bytesOnly)).toBe('2.0 KB');
+
+		const requestsOnly = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: { usage: { request_count: 12, bytes_transferred: null } }
+			}
+		}).run!;
+		expect(usageLabel(requestsOnly)).toBe('12 requests');
 	});
 
 	it('returns nothing when nothing was measured at all', () => {
@@ -393,15 +417,45 @@ describe('usageLabel (measured retrieval usage)', () => {
 			httpStatus: 200,
 			body: {
 				...runBody,
-				metrics: {
-					browser_wall_time_ms: null,
-					bytes_transferred: null,
-					network_request_count: null
-				}
+				metrics: { usage: { request_count: null, bytes_transferred: null } }
 			}
 		}).run!;
 		expect(usageLabel(allNull)).toBeNull();
+		const noUsageKey = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: { ...runBody, metrics: { cost_status: 'unpriced', cost_usd: null } }
+		}).run!;
+		expect(usageLabel(noUsageKey)).toBeNull();
 		expect(usageLabel({ ...runBodyView(), metrics: null })).toBeNull();
+	});
+
+	it('ignores the retired top-level flat usage fields instead of rendering them', () => {
+		const flatOnly = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: {
+					browser_wall_time_ms: 12340,
+					bytes_transferred: 1257438,
+					network_request_count: 37
+				}
+			}
+		}).run!;
+		expect(usageLabel(flatOnly)).toBeNull();
+
+		const flatBesideNested = parseDiscoveryRunResponse({
+			httpStatus: 200,
+			body: {
+				...runBody,
+				metrics: {
+					browser_wall_time_ms: 999_999,
+					bytes_transferred: 1,
+					network_request_count: 99,
+					usage: { request_count: 2, bytes_transferred: 2048 }
+				}
+			}
+		}).run!;
+		expect(usageLabel(flatBesideNested)).toBe('2 requests · 2.0 KB');
 	});
 });
 

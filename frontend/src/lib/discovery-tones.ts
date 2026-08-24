@@ -1,4 +1,3 @@
-import type { CostStatus } from './discovery-format';
 import type { ObservationStatus, RunStatus } from './discovery-contract';
 
 export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
@@ -29,12 +28,4 @@ export function observationTone(status: ObservationStatus): Tone {
 		return 'warning';
 	}
 	return 'danger';
-}
-
-/**
- * Pricing state is informational, never an alarm: unpriced means "the
- * backend did not measure a price", which is neither error nor warning.
- */
-export function costStatusTone(status: CostStatus): Tone {
-	return 'neutral';
 }
