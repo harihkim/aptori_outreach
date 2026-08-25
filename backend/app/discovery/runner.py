@@ -353,14 +353,14 @@ def _classify_result(
             )
         if doc.capability != EXPECTED_CAPABILITY:
             return _AttemptOutcome(
-                evidence_directory=str(doc.evidence_directory),
+                evidence_directory=doc.evidence_directory,
                 failure_class="contract_violation",
                 failure_reason=(
                     f"observation capability {doc.capability!r} is not "
                     f"{EXPECTED_CAPABILITY!r}"
                 ),
             )
-        return _AttemptOutcome(evidence_directory=str(doc.evidence_directory), doc=doc)
+        return _AttemptOutcome(evidence_directory=doc.evidence_directory, doc=doc)
 
     if result.evidence_source == "none" and result.exit_code == 0:
         # Exit 0 with neither a readable disk document nor even a locatable
@@ -445,7 +445,7 @@ def _roll_up_run(
 
     run.completed_at = _now()
     run.status = final_status
-    run.metrics = {
+    metrics: dict[str, object] = {
         "counts": dict(sorted(Counter(statuses).items())),
         "total_elapsed_ms": sum(row.elapsed_ms or 0 for row in rows),
         "cost_usd": None,
@@ -455,6 +455,7 @@ def _roll_up_run(
             "bytes_transferred": None,
         },
     }
+    run.metrics = metrics
     record_audit(
         session,
         actor="worker",

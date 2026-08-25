@@ -39,14 +39,18 @@ The suite migrates a dedicated test database (`aptori_outreach_test`, override w
 
 `TestClient` drives the app in-process over [httpx2](https://pypi.org/project/httpx2/), Starlette's current TestClient transport and a dev-only dependency; nothing in `app/` imports it.
 
-## Static checks
+## Static checks (CI gates)
 
-Three type checkers guard the codebase; all must pass before merge:
+CI runs these checks with Python 3.12 after `uv sync --frozen`; all three type
+checkers must pass before merge. Run the same sequence locally from `backend/`:
 
 ```bash
-~/.local/bin/uv run ty check app tests      # Astral ty
+~/.local/bin/uv python install 3.12
+~/.local/bin/uv sync --frozen
 ~/.local/bin/uv run mypy                    # strict mode + pydantic plugin
+~/.local/bin/uv run ty check app tests      # Astral ty
 ~/.local/bin/uv run pyrefly check           # Meta pyrefly (pyrefly.toml)
+~/.local/bin/uv run pytest
 ```
 
 Configuration lives in `pyproject.toml` (`[tool.mypy]`, `[tool.pydantic-mypy]`) and `pyrefly.toml`. Annotation conventions: PEP 604/585 syntax, parameterized generics, no bare `Callable`; never suppress missing-annotation errors.

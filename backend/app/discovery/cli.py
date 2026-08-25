@@ -103,13 +103,14 @@ def _recover_timed_out_document(output_root: Path, query_id: str) -> dict[str, A
         return None
 
     preferred_parent = f"attempt-{query_id}"
-    candidates.sort(
-        key=lambda path: (
+    def recovery_sort_key(path: Path) -> tuple[bool, int, str]:
+        return (
             path.parent.name != preferred_parent,
             -_mtime_ns(path),
             str(path),
         )
-    )
+
+    candidates.sort(key=recovery_sort_key)
     for path in candidates:
         try:
             parsed = json.loads(path.read_text(encoding="utf-8"))

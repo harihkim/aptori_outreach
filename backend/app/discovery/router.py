@@ -60,10 +60,10 @@ T = TypeVar("T")
 )
 def start_discovery_run(
     campaign_id: Annotated[UUID, Path()],
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    principal: PrincipalDep,
     payload: DiscoveryRunCreate | None = None,
-    session: SessionDep = None,  # type: ignore[assignment]
-    workspace: WorkspaceDep = None,  # type: ignore[assignment]
-    principal: PrincipalDep = None,  # type: ignore[assignment]
     idempotency_key: Annotated[
         str | None,
         Header(alias="Idempotency-Key", description=_IDEMPOTENCY_DESCRIPTION),
