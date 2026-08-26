@@ -10,7 +10,7 @@ from sqlalchemy.engine import Connection
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0009_failure_class_vocabulary"
+HEAD_REVISION = "0010_obs_workspace_idx"
 
 
 def _alembic_config(database_url: str) -> Config:
