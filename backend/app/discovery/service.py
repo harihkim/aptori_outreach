@@ -43,18 +43,6 @@ class WorkspaceAccessDenied(PermissionError):
     """The authenticated principal cannot operate on this workspace."""
 
 
-class CampaignNotFound(LookupError):
-    """No campaign with that id exists in the caller's workspace."""
-
-
-class CampaignNotActiveError(ValueError):
-    """Discovery runs may only start on active campaigns."""
-
-    def __init__(self, current: str) -> None:
-        self.current = current
-        super().__init__(f"campaign is {current}, not active")
-
-
 class RetrievalInputsInvalid(ValueError):
     """The frozen query document or provider config is unusable."""
 

@@ -164,7 +164,7 @@ function normalizeThread(data) {
         subreddit: postObj.subreddit_name_prefixed,
         totalReportedComments: postObj.num_comments,
         createdUtc: postObj.created_utc,
-        createdIso: new Date(postObj.created_utc * 1000).toISOString(),
+        createdIso: postObj.created_utc ? new Date(postObj.created_utc * 1000).toISOString() : null,
         selftext: postObj.selftext,
         permalink: postObj.permalink,
         locked: Boolean(postObj.locked),
@@ -186,7 +186,7 @@ function normalizeThread(data) {
                     depth: Number.isInteger(item.depth) ? item.depth : traversalDepth,
                     parentId: item.parent_id,
                     createdUtc: item.created_utc,
-                    createdIso: new Date(item.created_utc * 1000).toISOString(),
+                    createdIso: item.created_utc ? new Date(item.created_utc * 1000).toISOString() : null,
                     body: item.body,
                     visibility: item.author === '[deleted]' || item.body === '[deleted]'
                         ? 'deleted'

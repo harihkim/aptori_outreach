@@ -16,6 +16,9 @@ function prepareThreadGate(threadGate, threads) {
     if (!Number.isInteger(threadGate.baselineCohort.minimumSuccessfulThreadsPerRun)) {
         throw new Error('Baseline cohort requires an integer success floor');
     }
+    if (threadGate.baselineCohort.minimumSuccessfulThreadsPerRun < 0) {
+        throw new Error('Baseline success floor must be >= 0');
+    }
     if (threadGate.baselineCohort.minimumSuccessfulThreadsPerRun > baselineIds.length) {
         throw new Error('Baseline success floor exceeds its cohort size');
     }
@@ -67,12 +70,15 @@ function evaluateThreadGate({ threadGate, threads, runs }) {
 
         for (const [itemIndex, observation] of observations.entries()) {
             const threadId = threads[itemIndex].id;
+            // Positional pairing assumes caller preserves corpus order;
+            // mismatch would silently score wrong fixtures (documented gate contract).
             if (baselineIds.has(threadId) && observation.status === 'success') {
                 baselineSuccessCount += 1;
             }
-            if (observation.normalized && (
-                observation.normalized.validation.duplicateIds.length
-                || observation.normalized.validation.missingParentReferences.length
+            const validation = observation.normalized?.validation;
+            if (validation && (
+                validation.duplicateIds.length
+                || validation.missingParentReferences.length
             )) {
                 invalidTreeCount += 1;
             }
