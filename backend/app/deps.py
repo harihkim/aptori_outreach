@@ -41,7 +41,24 @@ def require_principal(
                 "message": "An API token (APTORI_API_TOKEN) must be configured.",
             },
         )
-    if credentials is None or not hmac.compare_digest(credentials.credentials, token):
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "unauthorized",
+                "message": "A valid bearer token is required.",
+            },
+        )
+    try:
+        # Starlette decodes header values as latin-1; comparing as utf-8 bytes
+        # avoids TypeError on non-ASCII and stays constant-time.
+        is_valid = hmac.compare_digest(
+            credentials.credentials.encode("utf-8"),
+            token.encode("utf-8"),
+        )
+    except (TypeError, UnicodeEncodeError):
+        is_valid = False
+    if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={

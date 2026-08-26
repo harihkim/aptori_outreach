@@ -19,6 +19,7 @@ other), while failed recovery falls back to the plain timeout classification.
 import asyncio
 import json
 import os
+import re
 import signal
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,13 +86,22 @@ def _mtime_ns(path: Path) -> int:
         return 0
 
 
+def _safe_name(value: str) -> str:
+    """Mirror packages/obscura-retrieval/src/evidence.js safeName."""
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value))
+    sanitized = sanitized.strip("-")[:80]
+    return sanitized or "attempt"
+
+
 def _recover_timed_out_document(output_root: Path, query_id: str) -> dict[str, Any] | None:
     """Deterministic disk recovery after a timeout kill.
 
-    Preference order: the attempt directory named for this query id first,
-    then any other observation.json under the evidence root, newest mtime
-    first with lexicographic path as the tie-break. The first candidate that
-    parses to a JSON object wins.
+    Preference order: attempt directories whose name starts with
+    ``safeName(query_id) + '_'`` first (matching the real evidence.js layout
+    ``<capability>/<safeName(logicalId)>_<timestamp>_<rand>/``), then any
+    other observation.json under the evidence root, newest mtime first with
+    lexicographic path as the tie-break. The first candidate that parses to a
+    JSON object wins.
     """
     if not output_root.exists():
         return None
@@ -102,10 +112,11 @@ def _recover_timed_out_document(output_root: Path, query_id: str) -> dict[str, A
     except OSError:
         return None
 
-    preferred_parent = f"attempt-{query_id}"
+    prefix = f"{_safe_name(query_id)}_"
+
     def recovery_sort_key(path: Path) -> tuple[bool, int, str]:
         return (
-            path.parent.name != preferred_parent,
+            not path.parent.name.startswith(prefix),
             -_mtime_ns(path),
             str(path),
         )
@@ -167,12 +178,31 @@ async def run_retrieval_cli(
         timed_out = True
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            process.kill()
+        except (ProcessLookupError, OSError):
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
         stdout_bytes, stderr_bytes = await process.communicate()
         # The CLI may have finished writing its evidence before it died;
         # disk recovery turns a killed attempt into a completed one.
         recovered_document = _recover_timed_out_document(Path(output_root), query_id)
+    except BaseException:
+        # arq enforces job_timeout by cancelling the task (CancelledError).
+        # Always kill the detached process group before propagating so the
+        # start_new_session child tree does not leak.
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await process.communicate()
+        except BaseException:
+            pass
+        raise
 
     stderr_tail = redact_sensitive_text(
         stderr_bytes.decode("utf-8", errors="replace")[-STDERR_TAIL_LIMIT:]

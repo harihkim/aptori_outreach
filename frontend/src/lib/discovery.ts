@@ -174,7 +174,7 @@ export function parseDiscoveryRunResponse({
 	httpStatus: number | null;
 	body: unknown;
 }): RunState {
-	if (httpStatus === null) {
+	if (httpStatus === null || httpStatus === 0) {
 		return { apiReachable: false, run: null, detail: 'Backend did not answer' };
 	}
 
@@ -203,7 +203,7 @@ export function parseObservationsResponse({
 	httpStatus: number | null;
 	body: unknown;
 }): ObservationsState {
-	if (httpStatus === null) {
+	if (httpStatus === null || httpStatus === 0) {
 		return {
 			apiReachable: false,
 			items: [],

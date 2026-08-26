@@ -33,10 +33,10 @@ class ObscuraDuckDuckGoLiteDiscoverySource {
         this.lastAttemptStartedMs = Date.now();
         const startedAt = new Date().toISOString();
         const startedMs = Date.now();
-        const attempt = createAttempt(this.outputRoot, 'discovery', input.id);
-        const target = buildDuckDuckGoLiteUrl(input);
-
+        const attempt = createAttempt(this.outputRoot, 'discovery', input.id || 'unknown');
+        let target;
         try {
+            target = buildDuckDuckGoLiteUrl(input);
             const pageResult = await this.runtime.runPage(target.url, async ({ page, navigationResponse, network }) => {
                 const pageState = await page.evaluate(() => ({
                     title: document.title,
@@ -114,6 +114,7 @@ class ObscuraDuckDuckGoLiteDiscoverySource {
             return observation;
         } catch (error) {
             const failure = classifyError(error);
+            const safeTarget = target || { url: '', query: input.query || '' };
             const observation = {
                 schemaVersion: 1,
                 observationId: attempt.attemptId,
@@ -126,7 +127,7 @@ class ObscuraDuckDuckGoLiteDiscoverySource {
                 status: failure.status,
                 failureReason: failure.reason,
                 input,
-                sourceUrl: target.url,
+                sourceUrl: safeTarget.url,
                 candidates: [],
                 candidateCount: 0,
                 runtime: this.runtime.describe(),

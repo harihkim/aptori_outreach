@@ -39,12 +39,14 @@ def _noop_shutdown(ctx: dict[str, object]) -> None:
 
 
 async def reap_stale_running_runs(ctx: object) -> int:
-    """Fail runs stuck in 'running' past any plausible attempt duration.
+    """Fail runs stuck in 'running' or 'queued' past any plausible duration.
 
     A worker crash between the claim commit and the settle transaction would
-    otherwise leave a run running forever. Reaping is row-locked, merges a
-    {'reaped': True} note into metrics, and writes its own audit event; the
-    returns count of reaped rows for observability.
+    otherwise leave a run running forever, and an enqueue failure after commit
+    (service.start_discovery_run) can leave a queued run with zero jobs
+    forever. Reaping is row-locked, merges a {'reaped': True} note into
+    metrics, and writes its own audit event; returns count of reaped rows
+    for observability.
     """
     del ctx  # the reaper owns its own database session
     settings = get_settings()
@@ -69,9 +71,24 @@ async def reap_stale_running_runs(ctx: object) -> int:
                         DiscoveryRun.started_at.is_not(None),
                         DiscoveryRun.started_at < cutoff,
                     )
+                    .order_by(DiscoveryRun.id)
                     .with_for_update()
                 )
             )
+            # Also reap orphaned queued runs whose enqueue never succeeded
+            # and whose created_at is older than the same threshold.
+            queued_stale = list(
+                session.scalars(
+                    select(DiscoveryRun)
+                    .where(
+                        DiscoveryRun.status == "queued",
+                        DiscoveryRun.created_at < cutoff,
+                    )
+                    .order_by(DiscoveryRun.id)
+                    .with_for_update()
+                )
+            )
+            stale_runs.extend(queued_stale)
             for run in stale_runs:
                 previous_status = run.status
                 run.status = "failed"

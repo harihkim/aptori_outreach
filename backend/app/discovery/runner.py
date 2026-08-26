@@ -270,8 +270,8 @@ def _outcome_to_row(
 ) -> RetrievalObservation:
     # Vocabulary audit: a classifier can never smuggle an out-of-taxonomy
     # failure class past this point (parity-checked down to the wire schema).
-    if outcome.failure_class is not None:
-        assert outcome.failure_class in FAILURE_CLASSES, (
+    if outcome.failure_class is not None and outcome.failure_class not in FAILURE_CLASSES:
+        raise ValueError(
             f"classifier produced out-of-vocabulary failure_class "
             f"{outcome.failure_class!r}"
         )
@@ -441,7 +441,10 @@ def _roll_up_run(
     measured_requests = [
         count for count in (_network_request_count(row) for row in rows) if count is not None
     ]
-    assert RUN_COST_UNPRICED in RUN_COST_STATUSES
+    if RUN_COST_UNPRICED not in RUN_COST_STATUSES:
+        raise ValueError(
+            f"RUN_COST_UNPRICED {RUN_COST_UNPRICED!r} not in RUN_COST_STATUSES"
+        )
 
     run.completed_at = _now()
     run.status = final_status
@@ -526,8 +529,15 @@ def _claim_run(
         # Entry-time refusals: untrusted kwargs become contract_violation
         # evidence inside the claim transaction; no subprocess ever runs and
         # no hostile string reaches the filesystem.
+        # Guard over-length ids before DB insert (String(200) / String(128)
+        # columns) so hostile kwargs never crash the violation-row INSERT.
         violation_reason: str | None = None
-        if QUERY_ID_PATTERN.fullmatch(query_id) is None:
+        if len(query_id) > 200 or len(correlation_id) > 128:
+            violation_reason = (
+                f"query id or correlation id exceeds column bounds "
+                f"(query_id len {len(query_id)}, correlation_id len {len(correlation_id)})"
+            )
+        elif QUERY_ID_PATTERN.fullmatch(query_id) is None:
             violation_reason = (
                 f"query id {query_id!r} does not match ^[A-Za-z0-9_-]{{1,64}}$"
             )
@@ -554,7 +564,8 @@ def _claim_run(
 
         # The refusal chain above records a violation whenever the id is
         # absent from the plan, so a claimed invocation always carries one.
-        assert entry is not None
+        if entry is None:
+            raise ValueError("invariant violation: claimed entry is None")
         return "claimed", _Claim(run_id=run_id, planned_ids=planned_ids, entry=entry)
 
 
@@ -598,6 +609,12 @@ def _settle_run(
         ).scalar_one_or_none()
         if run is None:
             return "run_missing"
+
+        # Terminal runs must not be mutated — late arrivals observe
+        # already_done instead of appending evidence that diverges from
+        # frozen metrics. See runner invariant at top of module.
+        if run.status in TERMINAL_RUN_STATUSES:
+            return "already_done"
 
         # Authoritative replay guard: skip the insert entirely when another
         # invocation already recorded this pair.

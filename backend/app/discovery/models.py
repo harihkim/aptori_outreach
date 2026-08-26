@@ -78,7 +78,7 @@ class DiscoveryRun(Base):
     __table_args__ = (
         CheckConstraint(
             _in_values("status", DISCOVERY_RUN_STATUSES),
-            name="ck_discovery_runs_status_values",
+            name="status_values",
         ),
         Index("ix_discovery_runs_campaign_creation_order", "campaign_id", "creation_order"),
     )
@@ -121,11 +121,11 @@ class RetrievalObservation(Base):
         ),
         CheckConstraint(
             _in_values("capability", OBSERVATION_CAPABILITIES),
-            name="ck_retrieval_observations_capability_values",
+            name="capability_values",
         ),
         CheckConstraint(
             _in_values("status", RETRIEVAL_OBSERVATION_STATUSES),
-            name="ck_retrieval_observations_status_values",
+            name="status_values",
         ),
         Index(
             "ix_retrieval_observations_run_creation_order",

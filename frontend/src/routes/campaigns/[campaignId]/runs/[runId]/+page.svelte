@@ -21,9 +21,21 @@
 	const items = $derived(data.observationsState.items);
 	const hasOlderObservations = $derived(data.observationsState.nextCursor !== null);
 	const isLive = $derived(run?.status === 'queued' || run?.status === 'running');
+	// Preserve last-known live status across transient unreachable polls so
+	// polling does not permanently stop and the retrying banner can render.
+	let stickyLive = $state(isLive);
+	$effect(() => {
+		if (isLive) {
+			stickyLive = true;
+		} else if (run !== null) {
+			// run is non-null and terminal — this is an authoritative value.
+			stickyLive = false;
+		}
+	});
+	const effectiveLive = $derived(stickyLive || isLive);
 	// The backend may blip while a run executes; that must read as
 	// "retrying", not as a dead end.
-	const unreachableWhileLive = $derived(!data.runState.apiReachable && isLive);
+	const unreachableWhileLive = $derived(!data.runState.apiReachable && effectiveLive);
 
 	const failureCounts = $derived.by(() => {
 		const counts: Record<string, number> = Object.create(null);
@@ -69,9 +81,10 @@
 	// tearing down the previous chain; each fresh chain starts its local
 	// attempt counter at zero, so a reachable backend resets the backoff,
 	// a terminal status never schedules, and unmount clears the timer.
+	// Use sticky live so transient unreachable does not kill polling.
 	const attachPolling: Attachment = () =>
 		startDiscoveryRunPolling(
-			() => ({ live: isLive, reachable: data.runState.apiReachable }),
+			() => ({ live: effectiveLive, reachable: data.runState.apiReachable }),
 			() => {
 				void invalidate('app:discovery-run');
 			}

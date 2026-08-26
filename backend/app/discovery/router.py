@@ -117,7 +117,7 @@ def list_run_observations(
     session: SessionDep,
     principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    cursor: Annotated[str | None, Query(max_length=200)] = None,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> ObservationPageResponse:
     try:
         observations, next_cursor = service.list_run_observations(

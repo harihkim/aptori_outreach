@@ -24,6 +24,9 @@ async function connectOverCdp(endpoint, processState, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {
+        if (processState.spawnError) {
+            throw new Error(`Obscura failed to spawn: ${processState.spawnError.message}`);
+        }
         if (processState.exitCode !== null) {
             throw new Error(`Obscura exited before CDP became ready (exit ${processState.exitCode})`);
         }
@@ -68,6 +71,10 @@ class ObscuraRuntime {
         this.process.stderr.on('data', chunk => {
             const remaining = Math.max(0, 65536 - this.stderr.join('').length);
             if (remaining) this.stderr.push(chunk.toString().slice(0, remaining));
+        });
+        this.process.on('error', error => {
+            this.processState.exitCode = 1;
+            this.processState.spawnError = error;
         });
         this.process.on('exit', code => { this.processState.exitCode = code; });
 
@@ -133,7 +140,13 @@ class ObscuraRuntime {
                 new Promise(resolve => this.process.once('exit', resolve)),
                 sleep(2000),
             ]);
-            if (this.process.exitCode === null) this.process.kill('SIGKILL');
+            if (this.process.exitCode === null) {
+                this.process.kill('SIGKILL');
+                await Promise.race([
+                    new Promise(resolve => this.process.once('exit', resolve)),
+                    sleep(1000),
+                ]);
+            }
         }
         this.process = null;
     }

@@ -87,7 +87,7 @@ export const load: PageServerLoad = async ({ fetch, depends, url }) => {
 		timeoutMs: 3000
 	});
 	const state = parseCampaignsResponse({
-		httpStatus: result.status || null,
+		httpStatus: result.status ?? null,
 		body: result.body
 	});
 

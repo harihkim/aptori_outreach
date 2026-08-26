@@ -4,6 +4,8 @@ export const POLL_MAX_MS = 15000;
 /**
  * Consecutive failed polls double the delay up to this exponent
  * (3s -> 6s -> 12s); anything beyond stays clamped by POLL_MAX_MS.
+ * Successful polls reset the counter so backoff only applies while
+ * the backend is unreachable.
  */
 const BACKOFF_MAX_EXPONENT = 3;
 
@@ -56,10 +58,15 @@ export function startDiscoveryRunPolling(
 
 	const tick = () => {
 		timer = undefined;
-		if (!gate().live) {
+		const snapshot = gate();
+		if (!snapshot.live) {
 			return;
 		}
-		attempts += 1;
+		if (snapshot.reachable) {
+			attempts = 0;
+		} else {
+			attempts += 1;
+		}
 		onPoll();
 		schedule();
 	};

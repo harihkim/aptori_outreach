@@ -1,7 +1,9 @@
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 
-const apiBaseUrl = publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+export function getApiBaseUrl(): string {
+	return publicEnv.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+}
 
 export type ApiResult = { ok: boolean; status: number; body: unknown };
 
@@ -43,7 +45,7 @@ export async function callApi(
 
 	async function attempt(): Promise<ApiResult> {
 		try {
-			const response = await requestFetch(`${apiBaseUrl}${path}`, {
+			const response = await requestFetch(`${getApiBaseUrl()}${path}`, {
 				method,
 				headers,
 				body: payload === null ? null : JSON.stringify(payload),

@@ -25,13 +25,18 @@ class ObscuraRedditThreadFetcher {
         const waitMs = Math.max(0, this.config.thread.minimumGapMs - (Date.now() - this.lastAttemptStartedMs));
         if (waitMs) await sleep(waitMs);
         this.lastAttemptStartedMs = Date.now();
-        const canonical = canonicalizeRedditThreadUrl(input.url);
-        const structuredEndpoint = redditJsonUrl(canonical.url, this.config.thread);
         const startedAt = new Date().toISOString();
         const startedMs = Date.now();
-        const attempt = createAttempt(this.outputRoot, 'thread-fetch', input.id || canonical.postId);
-
+        // Create attempt before URL validation so even malformed inputs
+        // persist a classified observation (ADR-012 invariant).
+        const attempt = createAttempt(this.outputRoot, 'thread-fetch', input.id || 'unknown');
+        let canonical;
+        let structuredEndpoint;
         try {
+            canonical = canonicalizeRedditThreadUrl(input.url);
+            structuredEndpoint = redditJsonUrl(canonical.url, this.config.thread);
+            // Fall through to page fetch inside same try so even
+            // canonicalization failures persist evidence.
             const pageResult = await this.runtime.runPage(canonical.url, async ({ page, navigationResponse, network }) => {
                 const pageState = await page.evaluate(() => ({
                     title: document.title,
@@ -128,6 +133,7 @@ class ObscuraRedditThreadFetcher {
             return observation;
         } catch (error) {
             const failure = classifyError(error);
+            const safeUrl = canonical?.url || input.url || '';
             const observation = {
                 schemaVersion: 1,
                 observationId: attempt.attemptId,
@@ -139,10 +145,10 @@ class ObscuraRedditThreadFetcher {
                 elapsedMs: Date.now() - startedMs,
                 status: failure.status,
                 failureReason: failure.reason,
-                input: { id: input.id || null, url: canonical.url },
-                sourceUrl: canonical.url,
-                externalSourceId: canonical.externalSourceId,
-                structuredEndpoint,
+                input: { id: input.id || null, url: safeUrl },
+                sourceUrl: safeUrl,
+                externalSourceId: canonical?.externalSourceId || null,
+                structuredEndpoint: structuredEndpoint || null,
                 normalized: null,
                 runtime: this.runtime.describe(),
                 evidenceDirectory: attempt.directory,

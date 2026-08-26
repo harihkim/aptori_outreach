@@ -35,6 +35,14 @@ function validateConfigShape(config) {
     if (!config.runtime?.nodeVersion || !config.runtime?.playwrightCoreVersion || config.runtime?.environment !== 'WSL') {
         throw new Error('Pinned WSL, Node, and Playwright Core runtime values are required');
     }
+    // Capability sections consumed by adapters — missing sections previously
+    // caused TypeErrors outside the evidence pipeline (no observation written).
+    if (!config.discovery || typeof config.discovery.minimumGapMs !== 'number' || typeof config.discovery.maxCandidates !== 'number') {
+        throw new Error('Provider config requires discovery.minimumGapMs and discovery.maxCandidates');
+    }
+    if (!config.thread || typeof config.thread.minimumGapMs !== 'number' || typeof config.thread.commentLimit !== 'number' || typeof config.thread.sort !== 'string') {
+        throw new Error('Provider config requires thread.minimumGapMs, thread.commentLimit, and thread.sort');
+    }
     return config;
 }
 
@@ -46,7 +54,7 @@ function verifyRuntime(config) {
         throw new Error(`Obscura binary hash drift: expected ${config.obscura.binarySha256}, got ${binarySha256}`);
     }
 
-    const versionOutput = execFileSync(binaryPath, ['--version'], { encoding: 'utf8' }).trim();
+    const versionOutput = execFileSync(binaryPath, ['--version'], { encoding: 'utf8', timeout: 5000 }).trim();
     if (versionOutput !== `obscura ${config.obscura.version}`) {
         throw new Error(`Obscura version drift: expected obscura ${config.obscura.version}, got ${versionOutput}`);
     }

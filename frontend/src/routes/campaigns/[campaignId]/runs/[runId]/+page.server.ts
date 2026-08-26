@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 		{ timeoutMs: 3000 }
 	);
 	const runState = parseDiscoveryRunResponse({
-		httpStatus: runResult.status || null,
+		httpStatus: runResult.status ?? null,
 		body: runResult.body
 	});
 
@@ -44,7 +44,7 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 		{ timeoutMs: 3000 }
 	);
 	const observationsState = parseObservationsResponse({
-		httpStatus: observationsResult.status || null,
+		httpStatus: observationsResult.status ?? null,
 		body: observationsResult.body
 	});
 

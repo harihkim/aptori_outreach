@@ -1,10 +1,10 @@
-import { env } from '$env/dynamic/public';
 import { parseHealthContract, type HealthBody } from '$lib/health';
+import { getApiBaseUrl } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ fetch, depends }) => {
 	depends('app:health');
-	const apiBaseUrl = env.PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
+	const apiBaseUrl = getApiBaseUrl();
 
 	let httpStatus: number | null = null;
 	let body: HealthBody | null = null;

@@ -78,7 +78,7 @@ def list_campaigns(
     workspace: WorkspaceDep,
     principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    cursor: Annotated[str | None, Query(max_length=200)] = None,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> CampaignPageResponse:
     try:
         campaigns, next_cursor = _authorized(
@@ -137,7 +137,7 @@ def list_campaign_audit(
     workspace: WorkspaceDep,
     principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    cursor: Annotated[str | None, Query(max_length=200)] = None,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> AuditEventPageResponse:
     try:
         events, next_cursor = _authorized(
