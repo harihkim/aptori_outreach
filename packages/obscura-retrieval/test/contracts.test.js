@@ -26,6 +26,15 @@ function validConfig() {
             nodeVersion: 'v20.18.0',
             playwrightCoreVersion: '1.62.1',
         },
+        discovery: {
+            minimumGapMs: 100,
+            maxCandidates: 10,
+        },
+        thread: {
+            minimumGapMs: 100,
+            commentLimit: 100,
+            sort: 'confidence',
+        },
     };
 }
 

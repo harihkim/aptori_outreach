@@ -2,10 +2,10 @@ export const POLL_BASE_MS = 3000;
 export const POLL_MAX_MS = 15000;
 
 /**
- * Consecutive failed polls double the delay up to this exponent
- * (3s -> 6s -> 12s); anything beyond stays clamped by POLL_MAX_MS.
- * Successful polls reset the counter so backoff only applies while
- * the backend is unreachable.
+ * Each poll doubles the delay up to this exponent (3s -> 6s -> 12s);
+ * anything beyond stays clamped by POLL_MAX_MS. Reachable resets happen
+ * via the attachment re-run (teardown + fresh chain at zero), not inside
+ * the tick — gate.reachable is tracked for that outer lifecycle.
  */
 const BACKOFF_MAX_EXPONENT = 3;
 
@@ -58,15 +58,10 @@ export function startDiscoveryRunPolling(
 
 	const tick = () => {
 		timer = undefined;
-		const snapshot = gate();
-		if (!snapshot.live) {
+		if (!gate().live) {
 			return;
 		}
-		if (snapshot.reachable) {
-			attempts = 0;
-		} else {
-			attempts += 1;
-		}
+		attempts += 1;
 		onPoll();
 		schedule();
 	};

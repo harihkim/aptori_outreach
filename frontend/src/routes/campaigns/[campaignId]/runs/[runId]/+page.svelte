@@ -23,6 +23,7 @@
 	const isLive = $derived(run?.status === 'queued' || run?.status === 'running');
 	// Preserve last-known live status across transient unreachable polls so
 	// polling does not permanently stop and the retrying banner can render.
+	// svelte-ignore state_referenced_locally: initial value intentionally captures mount-time live.
 	let stickyLive = $state(isLive);
 	$effect(() => {
 		if (isLive) {
