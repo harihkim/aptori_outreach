@@ -34,15 +34,16 @@ from app.discovery.observations import STATUS_VALUES
 from app.discovery.runner import _parse_iso, run_discovery_query
 from app.discovery.worker import reap_stale_running_runs
 from app.workspaces import DEFAULT_WORKSPACE_ID
+from tests.conftest import admin_database_url, configured_database_url
 
 WORKER_DATABASE_NAME = "aptori_outreach_worker_test"
-WORKER_DATABASE_URL = f"postgresql+psycopg://@/{WORKER_DATABASE_NAME}"
+WORKER_DATABASE_URL = configured_database_url(WORKER_DATABASE_NAME)
 
 
 @pytest.fixture(scope="session")
 def worker_database_url() -> Iterator[str]:
     """Migrate a dedicated append-only database for discovery worker tests."""
-    with connect("postgresql://", autocommit=True) as connection:
+    with connect(admin_database_url(WORKER_DATABASE_URL), autocommit=True) as connection:
         exists = connection.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (WORKER_DATABASE_NAME,),

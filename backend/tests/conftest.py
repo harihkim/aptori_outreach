@@ -7,6 +7,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from psycopg import connect, sql
+from sqlalchemy.engine import make_url
 
 TEST_DATABASE_URL = os.environ.get(
     "APTORI_TEST_DATABASE_URL",
@@ -14,14 +15,26 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
+def configured_database_url(database_name: str) -> str:
+    """Use the configured test server while selecting a dedicated database."""
+    return make_url(TEST_DATABASE_URL).set(database=database_name).render_as_string(
+        hide_password=False
+    )
+
+
+def admin_database_url(database_url: str) -> str:
+    """Connect to the configured PostgreSQL server's administrative database."""
+    return make_url(database_url).set(
+        drivername="postgresql", database="postgres"
+    ).render_as_string(hide_password=False)
+
+
 def _ensure_database(database_url: str) -> None:
     """Create the test database if it does not exist (superuser/owner only)."""
-    prefix = "postgresql+psycopg://"
-    if not database_url.startswith(prefix):
-        raise RuntimeError(f"Unsupported test database URL: {database_url}")
-    admin_url = "postgresql://" + database_url[len(prefix):]
-    base, _, database = admin_url.rpartition("/")
-    with connect(base or "postgresql://", autocommit=True) as connection:
+    database = make_url(database_url).database
+    if not database:
+        raise RuntimeError(f"Test database URL has no database name: {database_url}")
+    with connect(admin_database_url(database_url), autocommit=True) as connection:
         exists = connection.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
         ).fetchone()

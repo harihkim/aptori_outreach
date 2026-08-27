@@ -24,10 +24,11 @@ from app.discovery import router as discovery_router
 from app.discovery import service as discovery_service
 from app.main import create_app
 from app.workspaces import DEFAULT_WORKSPACE_ID
+from tests.conftest import admin_database_url, configured_database_url
 
 API_TOKEN = "test-token"
 DISCOVERY_DATABASE_NAME = "aptori_outreach_discovery_test"
-DISCOVERY_DATABASE_URL = f"postgresql+psycopg://@/{DISCOVERY_DATABASE_NAME}"
+DISCOVERY_DATABASE_URL = configured_database_url(DISCOVERY_DATABASE_NAME)
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 CORRELATION = re.compile(r"^[0-9a-f]{16}$")
@@ -40,7 +41,7 @@ def discovery_database_url() -> Iterator[str]:
     from alembic import command
     from alembic.config import Config
 
-    with connect("postgresql://", autocommit=True) as connection:
+    with connect(admin_database_url(DISCOVERY_DATABASE_URL), autocommit=True) as connection:
         exists = connection.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (DISCOVERY_DATABASE_NAME,),
