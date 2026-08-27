@@ -88,7 +88,7 @@ def _mtime_ns(path: Path) -> int:
 
 def _safe_name(value: str) -> str:
     """Mirror packages/obscura-retrieval/src/evidence.js safeName."""
-    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value))
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "-", value)
     sanitized = sanitized.strip("-")[:80]
     return sanitized or "attempt"
 
