@@ -174,7 +174,7 @@ async function main() {
         reportPath,
         passed,
         discovery: report.discovery,
-        threadFetch: { passed: report.threadFetch.passed, runs: threadRunSummaries.map(({ observations, ...run }) => run) },
+        threadFetch: { passed: report.threadFetch.passed, runs: threadRunSummaries.map(({ observations: _observations, ...run }) => run) },
         replay: { passed: report.replay.passed, checkCount: replayChecks.length },
     }, null, 2)}\n`);
     process.exitCode = passed ? 0 : 2;

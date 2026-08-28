@@ -63,6 +63,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm check
       - run: pnpm test
       - run: pnpm build
@@ -81,6 +82,7 @@ jobs:
           cache: npm
           cache-dependency-path: packages/obscura-retrieval/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm test
 
 # The ADR-012 prototype smoke gate is deliberately NOT run here: it needs the

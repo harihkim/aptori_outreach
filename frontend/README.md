@@ -32,11 +32,15 @@ PUBLIC_API_BASE_URL=http://localhost:8000 pnpm dev
 ## Checks and build
 
 ```bash
+pnpm lint         # Oxlint over JS, TS, and Svelte script blocks
 pnpm check        # svelte-check against tsconfig.json
 pnpm check:watch  # watch mode
 pnpm build        # vite build
 pnpm preview      # preview the production build
 ```
+
+Use `pnpm lint:fix` for Oxlint's automatic fixes. `svelte-check` remains the
+framework-aware component and TypeScript correctness gate.
 
 ## Backend contract
 
