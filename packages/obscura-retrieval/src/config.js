@@ -5,11 +5,14 @@ const path = require('node:path');
 
 const { sha256, sha256Json } = require('./json.js');
 
-function readProviderConfig(configPath) {
+function readProviderConfig(configPath, { requiredCapability = null } = {}) {
     const absolutePath = path.resolve(configPath);
     const raw = fs.readFileSync(absolutePath, 'utf8');
     const config = JSON.parse(raw);
     validateConfigShape(config);
+    if (requiredCapability !== null && config.capability !== requiredCapability) {
+        throw new Error(`Provider config capability mismatch: expected ${requiredCapability}, got ${config.capability}`);
+    }
     return {
         ...config,
         configPath: absolutePath,
@@ -20,6 +23,9 @@ function readProviderConfig(configPath) {
 function validateConfigShape(config) {
     if (config?.schemaVersion !== 1) throw new Error('Provider config schemaVersion must be 1');
     if (!config.providerVariant) throw new Error('Provider config requires providerVariant');
+    if (!['discovery', 'thread_fetch'].includes(config.capability)) {
+        throw new Error('Provider config capability must be discovery or thread_fetch');
+    }
     if (config.accessMode !== 'obscura_cdp_standard_anonymous') {
         throw new Error('Only obscura_cdp_standard_anonymous is authorized');
     }
@@ -35,13 +41,25 @@ function validateConfigShape(config) {
     if (!config.runtime?.nodeVersion || !config.runtime?.playwrightCoreVersion || config.runtime?.environment !== 'WSL') {
         throw new Error('Pinned WSL, Node, and Playwright Core runtime values are required');
     }
-    // Capability sections consumed by adapters — missing sections previously
-    // caused TypeErrors outside the evidence pipeline (no observation written).
-    if (!config.discovery || typeof config.discovery.minimumGapMs !== 'number' || typeof config.discovery.maxCandidates !== 'number') {
-        throw new Error('Provider config requires discovery.minimumGapMs and discovery.maxCandidates');
-    }
-    if (!config.thread || typeof config.thread.minimumGapMs !== 'number' || typeof config.thread.commentLimit !== 'number' || typeof config.thread.sort !== 'string') {
-        throw new Error('Provider config requires thread.minimumGapMs, thread.commentLimit, and thread.sort');
+    if (config.capability === 'discovery') {
+        if (!config.discovery
+            || typeof config.discovery.minimumGapMs !== 'number'
+            || typeof config.discovery.maxCandidates !== 'number') {
+            throw new Error('Provider config discovery capability requires discovery.minimumGapMs and discovery.maxCandidates');
+        }
+        if (config.thread != null) {
+            throw new Error('Provider config discovery capability must not define thread settings');
+        }
+    } else {
+        if (!config.thread
+            || typeof config.thread.minimumGapMs !== 'number'
+            || typeof config.thread.commentLimit !== 'number'
+            || typeof config.thread.sort !== 'string') {
+            throw new Error('Provider config thread_fetch capability requires thread.minimumGapMs, thread.commentLimit, and thread.sort');
+        }
+        if (config.discovery != null) {
+            throw new Error('Provider config thread_fetch capability must not define discovery settings');
+        }
     }
     return config;
 }

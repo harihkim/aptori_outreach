@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
-const { validateConfigShape } = require('../src/config.js');
+const { readProviderConfig, validateConfigShape } = require('../src/config.js');
 const { buildDuckDuckGoLiteUrl } = require('../src/discovery.js');
 const { canonicalJson } = require('../src/json.js');
 const { classifyError, classifyPageAccess, redactSensitiveText, redactUrl } = require('../src/status.js');
@@ -10,6 +13,7 @@ function validConfig() {
     return {
         schemaVersion: 1,
         providerVariant: 'test',
+        capability: 'discovery',
         accessMode: 'obscura_cdp_standard_anonymous',
         obscura: {
             version: '0.2.0',
@@ -30,13 +34,78 @@ function validConfig() {
             minimumGapMs: 100,
             maxCandidates: 10,
         },
-        thread: {
-            minimumGapMs: 100,
-            commentLimit: 100,
-            sort: 'confidence',
-        },
     };
 }
+
+const PROVIDER_CONFIG_ROOT = path.resolve(__dirname, '../../../retrieval-eval/prototype-smoke/provider-configs');
+
+function readConfigFixture(filename) {
+    return JSON.parse(fs.readFileSync(path.join(PROVIDER_CONFIG_ROOT, filename), 'utf8'));
+}
+
+test('provider config capability selects exactly one matching adapter section', () => {
+    const discoveryPath = path.join(PROVIDER_CONFIG_ROOT, 'obscura-duckduckgo-lite.json');
+    const threadPath = path.join(PROVIDER_CONFIG_ROOT, 'obscura-reddit-thread.json');
+    assert.equal(readProviderConfig(discoveryPath).capability, 'discovery');
+    assert.equal(readProviderConfig(threadPath).capability, 'thread_fetch');
+
+    const discovery = readConfigFixture('obscura-duckduckgo-lite.json');
+    const thread = readConfigFixture('obscura-reddit-thread.json');
+    assert.equal(validateConfigShape({ ...discovery, thread: null }).capability, 'discovery');
+    assert.equal(validateConfigShape({ ...thread, discovery: null }).capability, 'thread_fetch');
+
+    for (const [mutate, message] of [
+        [config => { delete config.capability; }, /capability must be discovery or thread_fetch/],
+        [config => { config.capability = 'unknown'; }, /capability must be discovery or thread_fetch/],
+        [config => { config.capability = 'thread_fetch'; }, /thread_fetch capability requires thread/],
+        [config => { config.thread = { minimumGapMs: 1, commentLimit: 1, sort: 'confidence' }; }, /discovery capability must not define thread/],
+        [config => { delete config.discovery; }, /discovery capability requires discovery/],
+    ]) {
+        const config = readConfigFixture('obscura-duckduckgo-lite.json');
+        mutate(config);
+        assert.throws(() => validateConfigShape(config), message);
+    }
+
+    for (const [mutate, message] of [
+        [config => { config.capability = 'discovery'; }, /discovery capability requires discovery/],
+        [config => { config.discovery = { minimumGapMs: 1, maxCandidates: 1 }; }, /thread_fetch capability must not define discovery/],
+        [config => { delete config.thread; }, /thread_fetch capability requires thread/],
+    ]) {
+        const config = readConfigFixture('obscura-reddit-thread.json');
+        mutate(config);
+        assert.throws(() => validateConfigShape(config), message);
+    }
+});
+
+test('provider config loading rejects a capability mismatch before runtime startup', () => {
+    const discoveryPath = path.join(PROVIDER_CONFIG_ROOT, 'obscura-duckduckgo-lite.json');
+    assert.throws(
+        () => readProviderConfig(discoveryPath, { requiredCapability: 'thread_fetch' }),
+        /Provider config capability mismatch: expected thread_fetch, got discovery/,
+    );
+});
+
+test('retrieval CLI rejects wrong-command configs before reading input or starting runtime', () => {
+    const cliPath = path.resolve(__dirname, '../bin/retrieval-cli.js');
+    for (const [command, filename, expected, actual] of [
+        ['discover', 'obscura-reddit-thread.json', 'discovery', 'thread_fetch'],
+        ['fetch-thread', 'obscura-duckduckgo-lite.json', 'thread_fetch', 'discovery'],
+    ]) {
+        const result = spawnSync(process.execPath, [
+            cliPath,
+            command,
+            '--config', path.join(PROVIDER_CONFIG_ROOT, filename),
+            '--input', '/tmp/aptori-r0-input-must-not-be-read.json',
+            '--output-root', '/tmp/aptori-r0-output-must-not-be-created',
+            '--id', 'test-id',
+        ], { encoding: 'utf8' });
+
+        assert.ifError(result.error);
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, new RegExp(`expected ${expected}, got ${actual}`));
+        assert.doesNotMatch(result.stderr, /ENOENT|runtime|Obscura/i);
+    }
+});
 
 test('config rejects every access mechanism outside ADR-012', () => {
     assert.equal(validateConfigShape(validConfig()).providerVariant, 'test');

@@ -28,7 +28,8 @@ function parseArgs(argv) {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const config = readProviderConfig(path.resolve(args.config));
+    const expectedCapability = args.command === 'discover' ? 'discovery' : 'thread_fetch';
+    const config = readProviderConfig(path.resolve(args.config), { requiredCapability: expectedCapability });
     const inputDocument = JSON.parse(fs.readFileSync(path.resolve(args.input), 'utf8'));
     const collection = inputDocument.queries || inputDocument.threads;
     const input = Array.isArray(collection)
