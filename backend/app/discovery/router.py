@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.deps import PrincipalDep, SessionDep, WorkspaceDep
 from app.discovery import queue, service
 from app.discovery.schemas import (
+    DiscoveryMethodPlan,
     DiscoveryRunCreate,
     DiscoveryRunResponse,
     ErrorResponse,
@@ -25,7 +26,10 @@ router = APIRouter(tags=["discovery"])
 _AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
     403: {"model": ErrorResponse, "description": "Workspace access denied."},
-    503: {"model": ErrorResponse, "description": "API token or workspace unconfigured."},
+    503: {
+        "model": ErrorResponse,
+        "description": "API token or workspace unconfigured.",
+    },
 }
 _WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
     **_AUTH_RESPONSES,
@@ -40,13 +44,16 @@ _IDEMPOTENCY_DESCRIPTION = (
     "Unique key for this logical write; retries return its original result."
 )
 
+
 # Overridable defaults so tests can inject fakes without Redis or frozen files.
-DEFAULT_PLAN_LOADER: service.PlanLoader = (
-    lambda: service.load_frozen_plan(
+def _load_default_plan() -> DiscoveryMethodPlan:
+    return service.load_frozen_plan(
         get_settings().discovery_query_document_path,
         get_settings().discovery_provider_config_path,
     )
-)
+
+
+DEFAULT_PLAN_LOADER: service.PlanLoader = _load_default_plan
 DEFAULT_ENQUEUE: service.Enqueue = queue.enqueue_discovery_queries
 
 T = TypeVar("T")

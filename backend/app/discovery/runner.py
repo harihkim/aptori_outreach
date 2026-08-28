@@ -270,7 +270,10 @@ def _outcome_to_row(
 ) -> RetrievalObservation:
     # Vocabulary audit: a classifier can never smuggle an out-of-taxonomy
     # failure class past this point (parity-checked down to the wire schema).
-    if outcome.failure_class is not None and outcome.failure_class not in FAILURE_CLASSES:
+    if (
+        outcome.failure_class is not None
+        and outcome.failure_class not in FAILURE_CLASSES
+    ):
         raise ValueError(
             f"classifier produced out-of-vocabulary failure_class "
             f"{outcome.failure_class!r}"
@@ -403,7 +406,10 @@ def _network_request_count(row: RetrievalObservation) -> int | None:
 
 
 def _roll_up_run(
-    session: Session, run: DiscoveryRun, planned_ids: tuple[str, ...], correlation_id: str
+    session: Session,
+    run: DiscoveryRun,
+    planned_ids: tuple[str, ...],
+    correlation_id: str,
 ) -> None:
     """Recount observations under lock and close the run when complete.
 
@@ -439,7 +445,9 @@ def _roll_up_run(
         final_status = "partial"
 
     measured_requests = [
-        count for count in (_network_request_count(row) for row in rows) if count is not None
+        count
+        for count in (_network_request_count(row) for row in rows)
+        if count is not None
     ]
     if RUN_COST_UNPRICED not in RUN_COST_STATUSES:
         raise ValueError(
@@ -522,9 +530,7 @@ def _claim_run(
 
         planned_queries = _plan_queries(run.method_plan)
         planned_ids = tuple(str(q.get("id")) for q in planned_queries)
-        entry = next(
-            (q for q in planned_queries if str(q.get("id")) == query_id), None
-        )
+        entry = next((q for q in planned_queries if str(q.get("id")) == query_id), None)
 
         # Entry-time refusals: untrusted kwargs become contract_violation
         # evidence inside the claim transaction; no subprocess ever runs and
@@ -569,7 +575,9 @@ def _claim_run(
         return "claimed", _Claim(run_id=run_id, planned_ids=planned_ids, entry=entry)
 
 
-async def _spawn_attempt(query_id: str, claim: _Claim, config: _AttemptConfig) -> _AttemptOutcome:
+async def _spawn_attempt(
+    query_id: str, claim: _Claim, config: _AttemptConfig
+) -> _AttemptOutcome:
     """Phase 2: spawn the CLI — no DB tx is open, kwargs are already vetted.
 
     The query input document is staged in the Python-owned scratch root; the

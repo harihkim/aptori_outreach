@@ -35,9 +35,8 @@ def test_health_reports_degraded_without_leaking_diagnostics(
     )
     app.state.database.probe = lambda: (False, leaky_diagnostic)
 
-    with caplog.at_level(logging.WARNING):
-        with TestClient(app) as client:
-            response = client.get("/health")
+    with caplog.at_level(logging.WARNING), TestClient(app) as client:
+        response = client.get("/health")
 
     assert response.status_code == 503
     body = response.json()
@@ -51,10 +50,14 @@ def test_health_reports_degraded_without_leaking_diagnostics(
         assert secret not in caplog.text
 
 
-def test_probe_logs_classification_without_credentials(caplog: pytest.LogCaptureFixture) -> None:
+def test_probe_logs_classification_without_credentials(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     # Local socket + missing database fails fast; credentials ride along to prove
     # they never reach the log.
-    manager = DatabaseSessionManager("postgresql+psycopg://secret_user:super_secret@/no_such_db")
+    manager = DatabaseSessionManager(
+        "postgresql+psycopg://secret_user:super_secret@/no_such_db"
+    )
     with caplog.at_level(logging.WARNING):
         healthy, diagnostic = manager.probe()
 
@@ -118,5 +121,5 @@ def test_database_connections_receive_a_bounded_connect_timeout(
 def test_backend_env_file_is_anchored_to_the_backend_directory() -> None:
     from app.config import BACKEND_ENV_FILE, Settings
 
-    assert BACKEND_ENV_FILE == Path(__file__).resolve().parents[1] / ".env"
+    assert Path(__file__).resolve().parents[1] / ".env" == BACKEND_ENV_FILE
     assert Path(str(Settings.model_config["env_file"])).is_absolute()

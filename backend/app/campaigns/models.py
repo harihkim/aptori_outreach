@@ -36,7 +36,9 @@ class Campaign(Base):
         CheckConstraint(
             _in_values("promotion_posture", CAMPAIGN_POSTURES), name="posture_values"
         ),
-        Index("ix_campaigns_workspace_creation_order", "workspace_id", "creation_order"),
+        Index(
+            "ix_campaigns_workspace_creation_order", "workspace_id", "creation_order"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

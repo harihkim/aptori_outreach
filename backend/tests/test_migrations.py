@@ -4,8 +4,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import DBAPIError
 
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
@@ -53,7 +53,9 @@ def observation_count(database_url: str) -> int:
         engine.dispose()
 
 
-def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database: str) -> None:
+def test_domain_migration_applies_and_rolls_back_cleanly(
+    migrated_test_database: str,
+) -> None:
     alembic_cfg = _alembic_config(migrated_test_database)
 
     # A previous suite may have left immutable evidence behind; only the
@@ -78,8 +80,12 @@ def test_domain_migration_applies_and_rolls_back_cleanly(migrated_test_database:
             "discovery_runs",
             "retrieval_observations",
         }
-        campaign_columns = {column["name"] for column in inspect(connection).get_columns("campaigns")}
-        audit_columns = {column["name"] for column in inspect(connection).get_columns("audit_events")}
+        campaign_columns = {
+            column["name"] for column in inspect(connection).get_columns("campaigns")
+        }
+        audit_columns = {
+            column["name"] for column in inspect(connection).get_columns("audit_events")
+        }
         assert "creation_order" in campaign_columns
         assert "event_order" in audit_columns
 
@@ -180,8 +186,12 @@ def test_stable_order_migration_backfills_existing_rows(
         ).scalar_one()
         assert campaign_order > 0
         assert event_order > 0
-        connection.execute(text("DELETE FROM audit_events WHERE id = :id"), {"id": event_id})
-        connection.execute(text("DELETE FROM campaigns WHERE id = :id"), {"id": campaign_id})
+        connection.execute(
+            text("DELETE FROM audit_events WHERE id = :id"), {"id": event_id}
+        )
+        connection.execute(
+            text("DELETE FROM campaigns WHERE id = :id"), {"id": campaign_id}
+        )
 
 
 def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
@@ -237,18 +247,16 @@ def test_retrieval_observations_reject_update_and_delete_at_sql_level(
     engine = create_engine(migrated_test_database)
     with engine.begin() as connection:
         _, observation_id = _seed_run_and_observation(connection)
-    with pytest.raises(DBAPIError):
-        with engine.begin() as connection:
-            connection.execute(
-                text("UPDATE retrieval_observations SET status = 'failed' WHERE id = :id"),
-                {"id": observation_id},
-            )
-    with pytest.raises(DBAPIError):
-        with engine.begin() as connection:
-            connection.execute(
-                text("DELETE FROM retrieval_observations WHERE id = :id"),
-                {"id": observation_id},
-            )
+    with pytest.raises(DBAPIError), engine.begin() as connection:
+        connection.execute(
+            text("UPDATE retrieval_observations SET status = 'failed' WHERE id = :id"),
+            {"id": observation_id},
+        )
+    with pytest.raises(DBAPIError), engine.begin() as connection:
+        connection.execute(
+            text("DELETE FROM retrieval_observations WHERE id = :id"),
+            {"id": observation_id},
+        )
 
     with engine.connect() as connection:
         row = connection.execute(
@@ -261,9 +269,8 @@ def test_retrieval_observations_reject_update_and_delete_at_sql_level(
 
 def test_truncate_is_rejected_by_guard_trigger(migrated_test_database: str) -> None:
     engine = create_engine(migrated_test_database)
-    with pytest.raises(DBAPIError):
-        with engine.begin() as connection:
-            connection.execute(text("TRUNCATE retrieval_observations"))
+    with pytest.raises(DBAPIError), engine.begin() as connection:
+        connection.execute(text("TRUNCATE retrieval_observations"))
 
 
 def test_security_definer_purge_surface_is_gone_at_head(
@@ -310,21 +317,20 @@ def test_failure_class_check_round_trips(migrated_test_database: str) -> None:
         _seed_run_and_observation(connection)
     assert observation_count(migrated_test_database) >= 1  # NULL class accepted
 
-    with pytest.raises(DBAPIError):
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO retrieval_observations "
-                    "(id, discovery_run_id, workspace_id, query_id, schema_version, "
-                    "capability, provider_variant, config_sha256, observation_id, "
-                    "status, failure_class, evidence_directory, correlation_id) "
-                    "VALUES ('00000000-0000-0000-0000-00000000000a', "
-                    "'00000000-0000-0000-0000-000000000008', :workspace, 'q-bogus', "
-                    "1, 'discovery', 'test-variant', :config, 'obs-bogus', 'failed', "
-                    "'totally_made_up_class', '/tmp/evidence/bogus', 'corr-bogus')"
-                ),
-                {"workspace": str(DEFAULT_WORKSPACE_ID), "config": "b" * 64},
-            )
+    with pytest.raises(DBAPIError), engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO retrieval_observations "
+                "(id, discovery_run_id, workspace_id, query_id, schema_version, "
+                "capability, provider_variant, config_sha256, observation_id, "
+                "status, failure_class, evidence_directory, correlation_id) "
+                "VALUES ('00000000-0000-0000-0000-00000000000a', "
+                "'00000000-0000-0000-0000-000000000008', :workspace, 'q-bogus', "
+                "1, 'discovery', 'test-variant', :config, 'obs-bogus', 'failed', "
+                "'totally_made_up_class', '/tmp/evidence/bogus', 'corr-bogus')"
+            ),
+            {"workspace": str(DEFAULT_WORKSPACE_ID), "config": "b" * 64},
+        )
 
     command.downgrade(alembic_cfg, "0008_observation_vocabulary")
     assert not _constraint_present()
@@ -349,15 +355,14 @@ def test_owner_purge_empties_table_and_restores_triggers(
     assert observation_count(migrated_test_database) == 0
 
     # The row triggers are re-enabled after the purge.
-    with pytest.raises(DBAPIError):
-        with engine.begin() as connection:
-            _seed_run_and_observation(connection)
-            connection.execute(
-                text(
-                    "UPDATE retrieval_observations SET status = 'failed' "
-                    "WHERE id = '00000000-0000-0000-0000-000000000009'"
-                )
+    with pytest.raises(DBAPIError), engine.begin() as connection:
+        _seed_run_and_observation(connection)
+        connection.execute(
+            text(
+                "UPDATE retrieval_observations SET status = 'failed' "
+                "WHERE id = '00000000-0000-0000-0000-000000000009'"
             )
+        )
 
 
 def test_discovery_migration_round_trips_through_previous_revision(

@@ -43,7 +43,9 @@ def write_stub_node(tmp_path: Path, *, body: str) -> Path:
 
 def write_input_and_config(tmp_path: Path) -> tuple[Path, Path]:
     input_path = tmp_path / "input-q-1.json"
-    input_path.write_text(json.dumps({"queries": [{"id": "q-1", "query": "api security"}]}))
+    input_path.write_text(
+        json.dumps({"queries": [{"id": "q-1", "query": "api security"}]})
+    )
     config_path = tmp_path / "provider-config.json"
     config_path.write_text(json.dumps({"providerVariant": "obscura-duckduckgo-lite"}))
     return input_path, config_path

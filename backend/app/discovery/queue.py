@@ -21,12 +21,12 @@ from app.config import get_settings
 class QueueEnqueueError(RuntimeError):
     """One or more discovery jobs were refused by the worker queue."""
 
-    def __init__(
-        self, *, enqueued: list[str], failed: dict[str, str]
-    ) -> None:
+    def __init__(self, *, enqueued: list[str], failed: dict[str, str]) -> None:
         self.enqueued = enqueued
         self.failed = failed
-        details = ", ".join(f"{query_id}: {error}" for query_id, error in sorted(failed.items()))
+        details = ", ".join(
+            f"{query_id}: {error}" for query_id, error in sorted(failed.items())
+        )
         super().__init__(
             f"worker queue refused {len(failed)} discovery job(s) [{details}]; "
             f"job ids enqueued before failure: {enqueued}. Retrying re-enqueues "

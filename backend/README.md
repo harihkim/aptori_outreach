@@ -41,18 +41,25 @@ The suite migrates a dedicated test database (`aptori_outreach_test`, override w
 
 ## Static checks (CI gates)
 
-CI runs these checks with Python 3.12 after `uv sync --frozen`; all three type
-checkers must pass before merge. Run the same sequence locally from `backend/`:
+CI runs these checks with Python 3.12 after `uv sync --frozen`; Ruff, all three
+type checkers, and the tests must pass before merge. Run the same sequence
+locally from `backend/`:
 
 ```bash
 ~/.local/bin/uv python install 3.12
 ~/.local/bin/uv sync --frozen
+~/.local/bin/uv run ruff check app tests    # lint + import order
+~/.local/bin/uv run ruff format --check app tests
 ~/.local/bin/uv run mypy                    # strict mode + pydantic plugin
 ~/.local/bin/uv run ty check app tests      # Astral ty
 ~/.local/bin/uv run pyrefly check           # Meta pyrefly (pyrefly.toml)
 ~/.local/bin/uv run pytest
 ```
 
-Configuration lives in `pyproject.toml` (`[tool.mypy]`, `[tool.pydantic-mypy]`) and `pyrefly.toml`. Annotation conventions: PEP 604/585 syntax, parameterized generics, no bare `Callable`; never suppress missing-annotation errors.
+Configuration lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`,
+`[tool.pydantic-mypy]`) and `pyrefly.toml`. Annotation conventions: PEP 604/585
+syntax, parameterized generics, no bare `Callable`; never suppress
+missing-annotation errors. Use `uv run ruff check app tests --fix` for Ruff's
+safe automatic lint fixes and `uv run ruff format app tests` to format.
 
 Configuration is environment-driven with the `APTORI_` prefix (see `app/config.py`). Copy `.env.example` to the git-ignored `backend/.env`; the backend resolves that file relative to its own package, independent of the process working directory. Production deployments should inject environment variables directly.

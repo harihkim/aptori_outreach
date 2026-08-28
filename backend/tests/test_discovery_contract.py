@@ -65,10 +65,11 @@ def test_run_metrics_shape_is_pinned_for_frontend_consumers() -> None:
     from app.discovery.models import RUN_COST_UNPRICED
     from app.discovery.runner import RUN_METRICS_KEYS, RUN_USAGE_KEYS
 
-    assert RUN_METRICS_KEYS == frozenset(
-        {"counts", "total_elapsed_ms", "cost_usd", "cost_status", "usage"}
+    assert (
+        frozenset({"counts", "total_elapsed_ms", "cost_usd", "cost_status", "usage"})
+        == RUN_METRICS_KEYS
     )
-    assert RUN_USAGE_KEYS == frozenset({"request_count", "bytes_transferred"})
+    assert frozenset({"request_count", "bytes_transferred"}) == RUN_USAGE_KEYS
     # The cost_status key in the pinned shape carries only frozen vocabulary.
     assert "cost_status" in RUN_METRICS_KEYS
     assert list(RUN_COST_STATUSES) == [RUN_COST_UNPRICED]
@@ -112,8 +113,7 @@ def test_failure_class_vocabulary_matches_every_layer(
 def _head_check_values(connection: Any, constraint_name: str) -> tuple[str, ...]:
     definition = connection.execute(
         text(
-            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-            "WHERE conname = :name"
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :name"
         ),
         {"name": constraint_name},
     ).scalar_one()

@@ -61,13 +61,17 @@ class ObservationDocument(BaseModel):
     completed_at: str = Field(alias="completedAt", max_length=64)
     elapsed_ms: int | None = Field(default=None, alias="elapsedMs")
     status: str = Field(max_length=64)
-    failure_reason: str | None = Field(default=None, alias="failureReason", max_length=2000)
+    failure_reason: str | None = Field(
+        default=None, alias="failureReason", max_length=2000
+    )
     input: dict[str, Any] | None = None
     source_url: str | None = Field(default=None, alias="sourceUrl", max_length=2048)
     final_url: str | None = Field(default=None, alias="finalUrl", max_length=2048)
     response: dict[str, Any] | None = None
     raw_artifact: dict[str, Any] | None = Field(default=None, alias="rawArtifact")
-    normalized_sha256: str | None = Field(default=None, alias="normalizedSha256", max_length=64)
+    normalized_sha256: str | None = Field(
+        default=None, alias="normalizedSha256", max_length=64
+    )
     candidate_count: int | None = Field(default=None, alias="candidateCount")
     candidates: list[dict[str, Any]] | None = None
     network: dict[str, Any] | None = None

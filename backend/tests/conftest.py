@@ -17,16 +17,20 @@ TEST_DATABASE_URL = os.environ.get(
 
 def configured_database_url(database_name: str) -> str:
     """Use the configured test server while selecting a dedicated database."""
-    return make_url(TEST_DATABASE_URL).set(database=database_name).render_as_string(
-        hide_password=False
+    return (
+        make_url(TEST_DATABASE_URL)
+        .set(database=database_name)
+        .render_as_string(hide_password=False)
     )
 
 
 def admin_database_url(database_url: str) -> str:
     """Connect to the configured PostgreSQL server's administrative database."""
-    return make_url(database_url).set(
-        drivername="postgresql", database="postgres"
-    ).render_as_string(hide_password=False)
+    return (
+        make_url(database_url)
+        .set(drivername="postgresql", database="postgres")
+        .render_as_string(hide_password=False)
+    )
 
 
 def _ensure_database(database_url: str) -> None:

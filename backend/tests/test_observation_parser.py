@@ -72,9 +72,7 @@ def golden_observation(status: str, **overrides: object) -> dict[str, object]:
         "rawArtifact": None,
         "normalizedSha256": "a" * 64,
         "candidateCount": 2,
-        "candidates": [
-            {"title": "t", "url": "https://reddit.com/r/x", "snippet": "s"}
-        ],
+        "candidates": [{"title": "t", "url": "https://reddit.com/r/x", "snippet": "s"}],
         "network": {"requests": 3},
         "runtime": {"node": "20.18.0"},
         "evidenceDirectory": "/evidence-runs/run/attempt-0001",
@@ -202,7 +200,9 @@ def test_oversized_string_fields_are_document_errors() -> None:
     with pytest.raises(ValidationError):
         parse_observation(oversized_observation_id)
 
-    oversized_url = golden_observation("success", sourceUrl="https://x.test/?q=" + "y" * 3000)
+    oversized_url = golden_observation(
+        "success", sourceUrl="https://x.test/?q=" + "y" * 3000
+    )
     with pytest.raises(ValidationError):
         parse_observation(oversized_url)
 

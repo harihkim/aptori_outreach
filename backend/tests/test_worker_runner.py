@@ -43,14 +43,18 @@ WORKER_DATABASE_URL = configured_database_url(WORKER_DATABASE_NAME)
 @pytest.fixture(scope="session")
 def worker_database_url() -> Iterator[str]:
     """Migrate a dedicated append-only database for discovery worker tests."""
-    with connect(admin_database_url(WORKER_DATABASE_URL), autocommit=True) as connection:
+    with connect(
+        admin_database_url(WORKER_DATABASE_URL), autocommit=True
+    ) as connection:
         exists = connection.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (WORKER_DATABASE_NAME,),
         ).fetchone()
         if not exists:
             connection.execute(
-                sql.SQL("CREATE DATABASE {}").format(sql.Identifier(WORKER_DATABASE_NAME))
+                sql.SQL("CREATE DATABASE {}").format(
+                    sql.Identifier(WORKER_DATABASE_NAME)
+                )
             )
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("script_location", "alembic")
@@ -60,7 +64,9 @@ def worker_database_url() -> Iterator[str]:
 
 
 @pytest.fixture()
-def worker_db(worker_database_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def worker_db(
+    worker_database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[str]:
     """Point cached settings at the worker database for the duration."""
     monkeypatch.setenv("APTORI_DATABASE_URL", worker_database_url)
     get_settings.cache_clear()
@@ -126,13 +132,19 @@ class StubHarness:
         self.config_path.write_text(json.dumps({"providerVariant": "stub"}))
         self.timeout_seconds = timeout_seconds
         if tail is None:
-            tail = f"sleep {sleep_seconds}\nexit 0\n" if sleep_seconds else DOCS_SERVING_TAIL
+            tail = (
+                f"sleep {sleep_seconds}\nexit 0\n"
+                if sleep_seconds
+                else DOCS_SERVING_TAIL
+            )
         body = f'DOCS="{self.docs_dir}"\n' + tail
         self.node_bin = write_raw_stub(tmp_path, body)
 
     def use_tail(self, tail: str) -> None:
         """Swap in a custom stub tail and re-install the settings seam."""
-        self.node_bin = write_raw_stub(self.tmp_path, f'DOCS="{self.docs_dir}"\n' + tail)
+        self.node_bin = write_raw_stub(
+            self.tmp_path, f'DOCS="{self.docs_dir}"\n' + tail
+        )
         self.install()
 
     def write_doc(self, qid: str, doc: dict[str, object]) -> None:
@@ -150,7 +162,9 @@ class StubHarness:
 
 
 @pytest.fixture()
-def harness(worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[StubHarness]:
+def harness(
+    worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[StubHarness]:
     """A default installed stub runtime for one test."""
     stub_harness = StubHarness(monkeypatch, tmp_path)
     stub_harness.install()
@@ -158,7 +172,9 @@ def harness(worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     get_settings.cache_clear()
 
 
-def fixture_doc(qid: str, status: str = "success", **overrides: object) -> dict[str, object]:
+def fixture_doc(
+    qid: str, status: str = "success", **overrides: object
+) -> dict[str, object]:
     """A discovery-shaped document matching packages/obscura-retrieval."""
     doc: dict[str, object] = {
         "schemaVersion": 1,
@@ -186,7 +202,9 @@ def fixture_doc(qid: str, status: str = "success", **overrides: object) -> dict[
     return doc
 
 
-def seed_run(database_url: str, *, correlation_id: str, query_ids: list[str]) -> uuid.UUID:
+def seed_run(
+    database_url: str, *, correlation_id: str, query_ids: list[str]
+) -> uuid.UUID:
     """Insert an ACTIVE campaign and a QUEUED run referencing the queries."""
     engine = create_engine(database_url)
     try:
@@ -203,7 +221,11 @@ def seed_run(database_url: str, *, correlation_id: str, query_ids: list[str]) ->
                 "provider_variant": "obscura-duckduckgo-lite",
                 "config_sha256": "0" * 64,
                 "queries": [
-                    {"id": qid, "query": f"search {qid}", "subreddits": ["cybersecurity"]}
+                    {
+                        "id": qid,
+                        "query": f"search {qid}",
+                        "subreddits": ["cybersecurity"],
+                    }
                     for qid in query_ids
                 ],
             }
@@ -288,7 +310,9 @@ def row_by_query(rows: list[RetrievalObservation], qid: str) -> RetrievalObserva
     return matches[0]
 
 
-def test_success_and_no_results_complete_the_run(harness: StubHarness, worker_db: str) -> None:
+def test_success_and_no_results_complete_the_run(
+    harness: StubHarness, worker_db: str
+) -> None:
     harness.write_doc("q-a", fixture_doc("q-a", "success"))
     harness.write_doc("q-b", fixture_doc("q-b", "no_results"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
@@ -336,10 +360,7 @@ def test_success_and_no_results_complete_the_run(harness: StubHarness, worker_db
     staged_input = harness.input_root / str(run_id) / "input-q-a.json"
     assert staged_input.is_file()
     assert list(staged_input.parent.glob("input-q-b.json"))
-    leaked_inputs = [
-        path.name
-        for path in harness.evidence_root.rglob("input-*.json")
-    ]
+    leaked_inputs = [path.name for path in harness.evidence_root.rglob("input-*.json")]
     assert leaked_inputs == []
 
 
@@ -359,7 +380,9 @@ def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -
     assert blocked_row.failure_class is None
 
 
-def test_blocked_and_rate_limited_fail_the_run(harness: StubHarness, worker_db: str) -> None:
+def test_blocked_and_rate_limited_fail_the_run(
+    harness: StubHarness, worker_db: str
+) -> None:
     harness.write_doc("q-a", fixture_doc("q-a", "blocked"))
     harness.write_doc("q-b", fixture_doc("q-b", "rate_limited"))
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
@@ -409,7 +432,9 @@ def test_replay_same_query_does_not_duplicate_observation(
     assert second_status == "already_done"
     assert len(load_rows(worker_db, run_id)) == 1
     started_events = [
-        event for event in load_audit(worker_db, run_id) if event.action == "discovery_run.started"
+        event
+        for event in load_audit(worker_db, run_id)
+        if event.action == "discovery_run.started"
     ]
     assert len(started_events) == 1
 
@@ -429,7 +454,9 @@ def test_correlation_id_flows_to_observations_and_audit(
     assert actions == ["discovery_run.completed", "discovery_run.started"]
     assert all(event.actor == "worker" for event in events)
     assert all(event.correlation_id == "corr-123" for event in events)
-    completed = next(event for event in events if event.action == "discovery_run.completed")
+    completed = next(
+        event for event in events if event.action == "discovery_run.completed"
+    )
     assert completed.before == {"status": "running"}
     assert completed.after == {"status": "succeeded"}
 
@@ -477,14 +504,18 @@ def test_timeout_with_written_evidence_recovers_completed_observation(
     run = load_run(worker_db, run_id)
     assert run.status == "succeeded"
     assert not [
-        event for event in load_audit(worker_db, run_id) if event.action == "discovery_run.reaped"
+        event
+        for event in load_audit(worker_db, run_id)
+        if event.action == "discovery_run.reaped"
     ]
 
 
 def test_wrapper_error_classified_from_plain_exit_one(
     worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    harness = StubHarness(monkeypatch, tmp_path, tail='echo "boom: wrapper crashed" >&2\nexit 1\n')
+    harness = StubHarness(
+        monkeypatch, tmp_path, tail='echo "boom: wrapper crashed" >&2\nexit 1\n'
+    )
     harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
@@ -499,7 +530,9 @@ def test_wrapper_error_classified_from_plain_exit_one(
 def test_transport_error_classified_from_other_nonzero_exit(
     worker_db: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    harness = StubHarness(monkeypatch, tmp_path, tail='echo "segfault-ish" >&2\nexit 2\n')
+    harness = StubHarness(
+        monkeypatch, tmp_path, tail='echo "segfault-ish" >&2\nexit 2\n'
+    )
     harness.install()
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
@@ -606,7 +639,7 @@ def test_stdout_without_pointer_is_never_trusted_as_evidence(
         "status": "success",
         # Deliberately NO evidenceDirectory: nothing on disk to trust.
     }
-    harness.use_tail(f'printf \'%s\' \'{json.dumps(projection)}\'\nexit 0\n')
+    harness.use_tail(f"printf '%s' '{json.dumps(projection)}'\nexit 0\n")
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
     final_status = invoke(run_id, "q-x")
@@ -628,7 +661,7 @@ def test_stdout_projection_never_feeds_the_full_parser(
         "status": "kind_of_fine",  # would raise unknown_observation_status if parsed
         "observationId": "attempt-q-x",
     }
-    harness.use_tail(f'printf \'%s\' \'{json.dumps(hostile_projection)}\'\nexit 0\n')
+    harness.use_tail(f"printf '%s' '{json.dumps(hostile_projection)}'\nexit 0\n")
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
 
     invoke(run_id, "q-x")
@@ -679,7 +712,9 @@ def test_all_twelve_statuses_roll_up_to_partial_with_usage_sums(
         total_elapsed += elapsed
         harness.write_doc(
             qid,
-            fixture_doc(qid, native_status, network={"requests": requests}, elapsedMs=elapsed),
+            fixture_doc(
+                qid, native_status, network={"requests": requests}, elapsedMs=elapsed
+            ),
         )
         qids.append(qid)
 
@@ -732,7 +767,9 @@ def test_reaper_fails_stale_running_run(worker_db: str) -> None:
     assert stale_run.metrics is not None
     assert stale_run.metrics["reaped"] is True
     events = load_audit(worker_db, run_id)
-    reaped_events = [event for event in events if event.action == "discovery_run.reaped"]
+    reaped_events = [
+        event for event in events if event.action == "discovery_run.reaped"
+    ]
     assert len(reaped_events) == 1
     assert reaped_events[0].correlation_id == "corr-reap"
     assert reaped_events[0].before == {"status": "running"}
@@ -740,7 +777,9 @@ def test_reaper_fails_stale_running_run(worker_db: str) -> None:
 
 
 def test_reaper_leaves_fresh_queued_and_terminal_runs_alone(worker_db: str) -> None:
-    fresh_running = seed_run(worker_db, correlation_id="corr-fresh-r", query_ids=["q-a"])
+    fresh_running = seed_run(
+        worker_db, correlation_id="corr-fresh-r", query_ids=["q-a"]
+    )
     queued = seed_run(worker_db, correlation_id="corr-fresh-q", query_ids=["q-b"])
     terminal = seed_run(worker_db, correlation_id="corr-fresh-t", query_ids=["q-c"])
     stale_cutoff = datetime.now(UTC) - timedelta(hours=2)
@@ -825,9 +864,7 @@ def test_midrun_replay_returns_running_without_respawning(
 ) -> None:
     """A redelivery while other queries are pending must not rerun the CLI."""
     counter = harness.tmp_path / "spawns.log"
-    spawn_counting_tail = (
-        f'echo x >> "{counter}"\n' + DOCS_SERVING_TAIL
-    )
+    spawn_counting_tail = f'echo x >> "{counter}"\n' + DOCS_SERVING_TAIL
     harness.use_tail(spawn_counting_tail)
     harness.write_doc("q-a", fixture_doc("q-a", "success"))
     harness.write_doc("q-b", fixture_doc("q-b", "blocked"))
@@ -890,38 +927,84 @@ def test_classification_outputs_stay_within_failure_class_vocabulary() -> None:
             "transport_timeout",
         ),
         (CliResult(exit_code=0, stderr_tail="", timed_out=False), "evidence_unlocated"),
-        (CliResult(exit_code=2, stderr_tail="boom", timed_out=False), "transport_error"),
-        (CliResult(exit_code=1, stderr_tail="plain crash", timed_out=False), "wrapper_error"),
+        (
+            CliResult(exit_code=2, stderr_tail="boom", timed_out=False),
+            "transport_error",
+        ),
+        (
+            CliResult(exit_code=1, stderr_tail="plain crash", timed_out=False),
+            "wrapper_error",
+        ),
         (
             CliResult(exit_code=1, stderr_tail="verifyRuntime failed", timed_out=False),
             "runtime_verification_failed",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk_unreadable"),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk_unreadable",
+            ),
             "evidence_unreadable",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="no_evidence_pointer"),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="no_evidence_pointer",
+            ),
             "evidence_unlocated",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=bad_schema),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk",
+                observation_doc=bad_schema,
+            ),
             "unknown_observation_schema",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=bad_status),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk",
+                observation_doc=bad_status,
+            ),
             "unknown_observation_status",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=oversized),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk",
+                observation_doc=oversized,
+            ),
             "contract_violation",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=wrong_capability),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk",
+                observation_doc=wrong_capability,
+            ),
             "contract_violation",
         ),
         (
-            CliResult(exit_code=0, stderr_tail="", timed_out=False, evidence_source="disk", observation_doc=valid),
+            CliResult(
+                exit_code=0,
+                stderr_tail="",
+                timed_out=False,
+                evidence_source="disk",
+                observation_doc=valid,
+            ),
             None,
         ),
     ]

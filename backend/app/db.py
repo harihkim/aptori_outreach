@@ -26,7 +26,9 @@ class DatabaseSessionManager:
             pool_pre_ping=True,
             connect_args=connect_args,
         )
-        self.session_factory = sessionmaker(bind=self.engine, future=True, expire_on_commit=False)
+        self.session_factory = sessionmaker(
+            bind=self.engine, future=True, expire_on_commit=False
+        )
 
     def session(self) -> Generator[Session, None, None]:
         session = self.session_factory()

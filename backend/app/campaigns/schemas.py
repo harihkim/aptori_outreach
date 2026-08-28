@@ -34,7 +34,9 @@ def _clean_tag_list(items: list[str]) -> list[str]:
     return cleaned
 
 
-TagList = Annotated[list[TagItem], Field(max_length=100), AfterValidator(_clean_tag_list)]
+TagList = Annotated[
+    list[TagItem], Field(max_length=100), AfterValidator(_clean_tag_list)
+]
 
 # product_context and icp are nullable columns: an explicit null clears them.
 NULLABLE_ON_UPDATE = frozenset({"product_context", "icp"})

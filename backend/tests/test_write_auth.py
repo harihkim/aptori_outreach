@@ -14,7 +14,9 @@ API_TOKEN = "test-token"
 
 
 def make_client(api_token: str | None, migrated_test_database: str) -> TestClient:
-    return TestClient(create_app(database_url=migrated_test_database, api_token=api_token))
+    return TestClient(
+        create_app(database_url=migrated_test_database, api_token=api_token)
+    )
 
 
 def create_payload() -> dict[str, Any]:
@@ -76,6 +78,8 @@ def test_writes_accept_the_configured_bearer_token(migrated_test_database: str) 
 
     assert response.status_code == 201
     assert response.json()["status"] == "draft"
+
+
 def test_an_empty_configured_token_is_treated_as_unconfigured(
     migrated_test_database: str,
 ) -> None:

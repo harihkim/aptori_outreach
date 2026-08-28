@@ -89,20 +89,30 @@ def load_frozen_plan(
                 f"query id {qid!r} must match ^[A-Za-z0-9_-]{{1,64}}$"
             )
         if qid in seen_ids:
-            raise RetrievalInputsInvalid(f"query id {qid!r} appears more than once in the plan")
+            raise RetrievalInputsInvalid(
+                f"query id {qid!r} appears more than once in the plan"
+            )
         seen_ids.add(qid)
         if not isinstance(text, str) or not text:
-            raise RetrievalInputsInvalid(f"query {qid!r} needs a non-empty string query")
+            raise RetrievalInputsInvalid(
+                f"query {qid!r} needs a non-empty string query"
+            )
         pattern = entry.get("pattern")
         if pattern is not None and not isinstance(pattern, str):
-            raise RetrievalInputsInvalid(f"query {qid!r} pattern must be a string or null")
+            raise RetrievalInputsInvalid(
+                f"query {qid!r} pattern must be a string or null"
+            )
         subreddits = entry.get("subreddits", [])
         if not isinstance(subreddits, list) or not all(
             isinstance(item, str) for item in subreddits
         ):
-            raise RetrievalInputsInvalid(f"query {qid!r} subreddits must be a string list")
+            raise RetrievalInputsInvalid(
+                f"query {qid!r} subreddits must be a string list"
+            )
         queries.append(
-            DiscoveryPlanQuery(id=qid, pattern=pattern, query=text, subreddits=subreddits)
+            DiscoveryPlanQuery(
+                id=qid, pattern=pattern, query=text, subreddits=subreddits
+            )
         )
 
     variant = config.get("providerVariant")
@@ -247,7 +257,9 @@ def list_run_observations(
         )
     rows = list(
         session.scalars(
-            statement.order_by(RetrievalObservation.creation_order.asc()).limit(limit + 1)
+            statement.order_by(RetrievalObservation.creation_order.asc()).limit(
+                limit + 1
+            )
         )
     )
     page = rows[:limit]

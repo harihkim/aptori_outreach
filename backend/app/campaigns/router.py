@@ -23,7 +23,10 @@ router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 _AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
     403: {"model": ErrorResponse, "description": "Workspace access denied."},
-    503: {"model": ErrorResponse, "description": "API token or workspace unconfigured."},
+    503: {
+        "model": ErrorResponse,
+        "description": "API token or workspace unconfigured.",
+    },
 }
 _WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
     **_AUTH_RESPONSES,
@@ -113,9 +116,7 @@ def get_campaign(
 ) -> CampaignResponse:
     try:
         campaign = _authorized(
-            lambda: service.get_campaign(
-                session, principal, workspace.id, campaign_id
-            )
+            lambda: service.get_campaign(session, principal, workspace.id, campaign_id)
         )
     except service.CampaignNotFound:
         raise _not_found() from None

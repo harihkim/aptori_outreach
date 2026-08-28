@@ -37,18 +37,22 @@ CORRELATION = re.compile(r"^[0-9a-f]{16}$")
 @pytest.fixture(scope="session")
 def discovery_database_url() -> Iterator[str]:
     """Create and migrate a dedicated append-only database for this module."""
-    from psycopg import connect, sql
     from alembic import command
     from alembic.config import Config
+    from psycopg import connect, sql
 
-    with connect(admin_database_url(DISCOVERY_DATABASE_URL), autocommit=True) as connection:
+    with connect(
+        admin_database_url(DISCOVERY_DATABASE_URL), autocommit=True
+    ) as connection:
         exists = connection.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (DISCOVERY_DATABASE_NAME,),
         ).fetchone()
         if not exists:
             connection.execute(
-                sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DISCOVERY_DATABASE_NAME))
+                sql.SQL("CREATE DATABASE {}").format(
+                    sql.Identifier(DISCOVERY_DATABASE_NAME)
+                )
             )
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("script_location", "alembic")
@@ -86,10 +90,16 @@ def write_headers(key: str | None = None) -> dict[str, str]:
 
 def active_campaign(api: TestClient) -> dict[str, Any]:
     created = api.post(
-        "/campaigns", headers=write_headers(), json={"name": "Discovery API", "promotion_posture": "expertise_first"}
+        "/campaigns",
+        headers=write_headers(),
+        json={"name": "Discovery API", "promotion_posture": "expertise_first"},
     ).json()
     assert isinstance(created, dict)
-    api.patch(f"/campaigns/{created['id']}", headers=write_headers(), json={"status": "active"})
+    api.patch(
+        f"/campaigns/{created['id']}",
+        headers=write_headers(),
+        json={"status": "active"},
+    )
     return created
 
 
@@ -107,8 +117,14 @@ class FakeEnqueue:
         self.calls: list[tuple[str, str, list[str]]] = []
         self.fail_next = False
 
-    async def __call__(self, run_id: object, correlation_id: str, query_ids: list[str]) -> None:
-        call: tuple[str, str, list[str]] = (str(run_id), correlation_id, list(query_ids))
+    async def __call__(
+        self, run_id: object, correlation_id: str, query_ids: list[str]
+    ) -> None:
+        call: tuple[str, str, list[str]] = (
+            str(run_id),
+            correlation_id,
+            list(query_ids),
+        )
         self.calls.append(call)
         if self.fail_next:
             self.fail_next = False
@@ -157,7 +173,9 @@ def insert_observation(engine_url: str, run_id: str, qid: str, status: str) -> N
         engine.dispose()
 
 
-def started_run(api: TestClient, fake_enqueue: FakeEnqueue) -> tuple[dict[str, Any], str]:
+def started_run(
+    api: TestClient, fake_enqueue: FakeEnqueue
+) -> tuple[dict[str, Any], str]:
     campaign = active_campaign(api)
     response = start_run(api, campaign["id"])
     assert response.status_code == 201
@@ -240,13 +258,23 @@ def test_non_active_campaign_conflicts(
     api: TestClient, fake_enqueue: FakeEnqueue, status: str
 ) -> None:
     created = api.post(
-        "/campaigns", headers=write_headers(), json={"name": f"Not {status}", "promotion_posture": "balanced"}
+        "/campaigns",
+        headers=write_headers(),
+        json={"name": f"Not {status}", "promotion_posture": "balanced"},
     ).json()
     if status != "draft":
         # Legal path: draft -> active -> paused|archived.
-        api.patch(f"/campaigns/{created['id']}", headers=write_headers(), json={"status": "active"})
+        api.patch(
+            f"/campaigns/{created['id']}",
+            headers=write_headers(),
+            json={"status": "active"},
+        )
         if status != "active":
-            api.patch(f"/campaigns/{created['id']}", headers=write_headers(), json={"status": status})
+            api.patch(
+                f"/campaigns/{created['id']}",
+                headers=write_headers(),
+                json={"status": status},
+            )
 
     response = start_run(api, created["id"])
 
@@ -256,7 +284,9 @@ def test_non_active_campaign_conflicts(
     assert status in detail["message"]
 
 
-def test_unknown_campaign_is_not_found(api: TestClient, fake_enqueue: FakeEnqueue) -> None:
+def test_unknown_campaign_is_not_found(
+    api: TestClient, fake_enqueue: FakeEnqueue
+) -> None:
     response = start_run(api, str(uuid.uuid4()))
 
     assert response.status_code == 404
@@ -284,17 +314,21 @@ def test_service_rejects_principal_without_workspace_access(
         raise AssertionError("not reached")
 
     try:
-        with Session(engine) as session:
-            with pytest.raises(discovery_service.WorkspaceAccessDenied):
-                discovery_service.start_discovery_run(
-                    session,
-                    principal,
-                    DEFAULT_WORKSPACE_ID,
-                    uuid.uuid4(),
-                    key="outsider-key",
-                    plan_loader=lambda: (_ for _ in ()).throw(AssertionError("not reached")),
-                    enqueue=refuse_enqueue,
-                )
+        with (
+            Session(engine) as session,
+            pytest.raises(discovery_service.WorkspaceAccessDenied),
+        ):
+            discovery_service.start_discovery_run(
+                session,
+                principal,
+                DEFAULT_WORKSPACE_ID,
+                uuid.uuid4(),
+                key="outsider-key",
+                plan_loader=lambda: (_ for _ in ()).throw(
+                    AssertionError("not reached")
+                ),
+                enqueue=refuse_enqueue,
+            )
     finally:
         engine.dispose()
 
@@ -396,9 +430,17 @@ def test_get_run_contract_and_unknown_404(
     assert detail["correlation_id"] == body["correlation_id"]
     assert detail["metrics"] is None
     assert set(detail) >= {
-        "id", "campaign_id", "workspace_id", "status", "method_plan",
-        "correlation_id", "metrics", "started_at", "completed_at",
-        "created_at", "updated_at",
+        "id",
+        "campaign_id",
+        "workspace_id",
+        "status",
+        "method_plan",
+        "correlation_id",
+        "metrics",
+        "started_at",
+        "completed_at",
+        "created_at",
+        "updated_at",
     }
 
     missing = api.get(f"/discovery-runs/{uuid.uuid4()}")
@@ -416,11 +458,19 @@ def test_observations_page_walks_creation_order_with_cursor(
     assert empty.status_code == 200
     assert empty.json() == {"items": [], "next_cursor": None}
 
-    insert_observation(discovery_database_url, run_id, "q01-api-security-broad", "success")
-    insert_observation(discovery_database_url, run_id, "q02-appsec-tools-broad", "blocked")
+    insert_observation(
+        discovery_database_url, run_id, "q01-api-security-broad", "success"
+    )
+    insert_observation(
+        discovery_database_url, run_id, "q02-appsec-tools-broad", "blocked"
+    )
 
-    page_one = api.get(f"/discovery-runs/{run_id}/observations", params={"limit": 1}).json()
-    assert [item["query_id"] for item in page_one["items"]] == ["q01-api-security-broad"]
+    page_one = api.get(
+        f"/discovery-runs/{run_id}/observations", params={"limit": 1}
+    ).json()
+    assert [item["query_id"] for item in page_one["items"]] == [
+        "q01-api-security-broad"
+    ]
     assert page_one["items"][0]["status"] == "success"
     assert page_one["next_cursor"] is not None
 
@@ -428,16 +478,32 @@ def test_observations_page_walks_creation_order_with_cursor(
         f"/discovery-runs/{run_id}/observations",
         params={"limit": 1, "cursor": page_one["next_cursor"]},
     ).json()
-    assert [item["query_id"] for item in page_two["items"]] == ["q02-appsec-tools-broad"]
+    assert [item["query_id"] for item in page_two["items"]] == [
+        "q02-appsec-tools-broad"
+    ]
     assert page_two["items"][0]["status"] == "blocked"
     assert page_two["next_cursor"] is None
 
     item = page_one["items"][0]
     assert set(item) >= {
-        "id", "query_id", "capability", "status", "failure_class", "failure_reason",
-        "provider_variant", "config_sha256", "schema_version", "candidate_count",
-        "candidates", "normalized_sha256", "elapsed_ms", "evidence_directory",
-        "correlation_id", "started_at", "completed_at", "created_at",
+        "id",
+        "query_id",
+        "capability",
+        "status",
+        "failure_class",
+        "failure_reason",
+        "provider_variant",
+        "config_sha256",
+        "schema_version",
+        "candidate_count",
+        "candidates",
+        "normalized_sha256",
+        "elapsed_ms",
+        "evidence_directory",
+        "correlation_id",
+        "started_at",
+        "completed_at",
+        "created_at",
     }
     assert item["failure_class"] is None
 
@@ -446,8 +512,12 @@ def test_api_never_recomputes_metrics_from_direct_rows(
     api: TestClient, fake_enqueue: FakeEnqueue, discovery_database_url: str
 ) -> None:
     body, _campaign_id = started_run(api, fake_enqueue)
-    insert_observation(discovery_database_url, body["id"], "q01-api-security-broad", "blocked")
-    insert_observation(discovery_database_url, body["id"], "q02-appsec-tools-broad", "success")
+    insert_observation(
+        discovery_database_url, body["id"], "q01-api-security-broad", "blocked"
+    )
+    insert_observation(
+        discovery_database_url, body["id"], "q02-appsec-tools-broad", "success"
+    )
 
     detail = api.get(f"/discovery-runs/{body['id']}").json()
 
@@ -511,7 +581,9 @@ def test_load_frozen_plan_rejects_duplicate_query_ids(tmp_path: Path) -> None:
         ],
     )
 
-    with pytest.raises(discovery_service.RetrievalInputsInvalid, match="more than once"):
+    with pytest.raises(
+        discovery_service.RetrievalInputsInvalid, match="more than once"
+    ):
         discovery_service.load_frozen_plan(document_path, config_path)
 
 

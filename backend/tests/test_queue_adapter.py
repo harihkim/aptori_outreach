@@ -23,7 +23,11 @@ from app.discovery.worker import WorkerSettings
 
 RUN_ID = uuid.UUID("00000000-0000-0000-0000-00000000c101")
 CORRELATION_ID = "corr-queue-fanout"
-QUERY_IDS = ["q01-api-security-broad", "q02-appsec-tools-broad", "q03-sast-false-positives"]
+QUERY_IDS = [
+    "q01-api-security-broad",
+    "q02-appsec-tools-broad",
+    "q03-sast-false-positives",
+]
 
 
 class StubPool:
@@ -64,9 +68,7 @@ def expected_job_id(query_id: str) -> str:
 
 
 def test_fanout_enqueues_one_job_per_query_and_closes_pool(stub_pool: StubPool) -> None:
-    job_ids = asyncio.run(
-        enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS)
-    )
+    job_ids = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
 
     assert job_ids == [expected_job_id(qid) for qid in QUERY_IDS]
     assert len(stub_pool.calls) == len(QUERY_IDS)
@@ -123,7 +125,10 @@ def test_partial_failure_raises_identifying_failed_and_enqueued(
         asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
 
     error = excinfo.value
-    assert error.enqueued == [expected_job_id(QUERY_IDS[0]), expected_job_id(QUERY_IDS[2])]
+    assert error.enqueued == [
+        expected_job_id(QUERY_IDS[0]),
+        expected_job_id(QUERY_IDS[2]),
+    ]
     assert set(error.failed) == {failing}
     message = str(error)
     assert failing in message

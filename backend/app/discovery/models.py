@@ -23,7 +23,14 @@ from app.orm import Base
 # Wire values for the Discovery lifecycle and retrieval evidence. The
 # database CHECK constraints enforce exactly these sets (see migration 0008);
 # tests assert head-schema/ORM/contract parity so drift fails deterministically.
-DISCOVERY_RUN_STATUSES = ("queued", "running", "succeeded", "partial", "failed", "cancelled")
+DISCOVERY_RUN_STATUSES = (
+    "queued",
+    "running",
+    "succeeded",
+    "partial",
+    "failed",
+    "cancelled",
+)
 OBSERVATION_CAPABILITIES = ("discovery", "thread_fetch")
 # Identical to observations.STATUS_VALUES: the twelve native statuses emitted
 # by the frozen Node observation document. Backend-classified outcomes such as
@@ -80,7 +87,9 @@ class DiscoveryRun(Base):
             _in_values("status", DISCOVERY_RUN_STATUSES),
             name="status_values",
         ),
-        Index("ix_discovery_runs_campaign_creation_order", "campaign_id", "creation_order"),
+        Index(
+            "ix_discovery_runs_campaign_creation_order", "campaign_id", "creation_order"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -138,9 +147,7 @@ class RetrievalObservation(Base):
     creation_order: Mapped[int] = mapped_column(
         BigInteger, Identity(always=True), unique=True
     )
-    discovery_run_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("discovery_runs.id")
-    )
+    discovery_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("discovery_runs.id"))
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), index=True
     )

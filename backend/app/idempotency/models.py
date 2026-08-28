@@ -19,7 +19,9 @@ class IdempotencyEvent(Base):
 
     __tablename__ = "idempotency_events"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "key", name="uq_idempotency_events_workspace_key"),
+        UniqueConstraint(
+            "workspace_id", "key", name="uq_idempotency_events_workspace_key"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

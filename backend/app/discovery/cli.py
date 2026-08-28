@@ -21,6 +21,7 @@ import json
 import os
 import re
 import signal
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -48,7 +49,9 @@ class CliResult:
     observation_doc: dict[str, Any] | None = None
 
 
-def _read_disk_observation(evidence_directory: str) -> tuple[EvidenceSource, dict[str, Any] | None]:
+def _read_disk_observation(
+    evidence_directory: str,
+) -> tuple[EvidenceSource, dict[str, Any] | None]:
     """Read the authoritative observation.json below the evidence directory."""
     disk_path = Path(evidence_directory) / "observation.json"
     try:
@@ -93,7 +96,9 @@ def _safe_name(value: str) -> str:
     return sanitized or "attempt"
 
 
-def _recover_timed_out_document(output_root: Path, query_id: str) -> dict[str, Any] | None:
+def _recover_timed_out_document(
+    output_root: Path, query_id: str
+) -> dict[str, Any] | None:
     """Deterministic disk recovery after a timeout kill.
 
     Preference order: attempt directories whose name starts with
@@ -174,15 +179,13 @@ async def run_retrieval_cli(
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             process.communicate(), timeout=timeout_seconds
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         timed_out = True
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except (ProcessLookupError, OSError):
-            try:
+            with suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
         stdout_bytes, stderr_bytes = await process.communicate()
         # The CLI may have finished writing its evidence before it died;
         # disk recovery turns a killed attempt into a completed one.
@@ -194,14 +197,10 @@ async def run_retrieval_cli(
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except (ProcessLookupError, OSError):
-            try:
+            with suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
-        try:
+        with suppress(BaseException):
             await process.communicate()
-        except BaseException:
-            pass
         raise
 
     stderr_tail = redact_sensitive_text(

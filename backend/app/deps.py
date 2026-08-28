@@ -27,9 +27,7 @@ _bearer = HTTPBearer(auto_error=False)
 
 def require_principal(
     request: Request,
-    credentials: Annotated[
-        HTTPAuthorizationCredentials | None, Depends(_bearer)
-    ],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> Principal:
     """Authenticate a request as the deployment's internal operator."""
     token = request.app.state.api_token

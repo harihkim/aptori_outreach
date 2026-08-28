@@ -4,7 +4,6 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 REPO_ROOT = BACKEND_ENV_FILE.parents[1]
 

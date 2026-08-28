@@ -5,9 +5,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import Principal
 from app.auditing.models import AuditEvent
 from app.auditing.service import record_audit
+from app.auth import Principal
 from app.campaigns.models import Campaign
 from app.campaigns.schemas import (
     CampaignCreate,
@@ -58,7 +58,9 @@ def create_campaign(
     _require_workspace_access(principal, workspace_id)
 
     def operation() -> idempotency.Replay:
-        campaign = _stage_create_campaign(session, workspace_id, principal.actor, payload)
+        campaign = _stage_create_campaign(
+            session, workspace_id, principal.actor, payload
+        )
         return _campaign_result(session, campaign, status_code=201)
 
     return idempotency.execute(
@@ -291,9 +293,7 @@ def _error_result(status_code: int, code: str, message: str) -> idempotency.Repl
     )
 
 
-def _require_workspace_access(
-    principal: Principal, workspace_id: uuid.UUID
-) -> None:
+def _require_workspace_access(principal: Principal, workspace_id: uuid.UUID) -> None:
     if not principal.can_access(workspace_id):
         raise WorkspaceAccessDenied(str(workspace_id))
 
