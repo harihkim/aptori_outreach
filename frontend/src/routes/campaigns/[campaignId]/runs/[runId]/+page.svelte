@@ -11,6 +11,7 @@
 		type Observation,
 		type Tone
 	} from '$lib/discovery';
+	import { DISCOVERY_EVENT_TYPES, parseDiscoveryEvent } from '$lib/discovery-events';
 	import type { Attachment } from 'svelte/attachments';
 	import type { PageData } from './$types';
 	import { startDiscoveryRunPolling } from './polling';
@@ -34,9 +35,80 @@
 		}
 	});
 	const effectiveLive = $derived(stickyLive || isLive);
+	let streamConnected = $state(false);
+	let streamUnavailable = $state(false);
+	const effectivePollingLive = $derived(effectiveLive && !streamConnected);
 	// The backend may blip while a run executes; that must read as
 	// "retrying", not as a dead end.
 	const unreachableWhileLive = $derived(!data.runState.apiReachable && effectiveLive);
+
+	// EventSource cannot send the private backend token, so this connects to
+	// the same-origin SvelteKit proxy. Polling remains armed until the stream
+	// opens and is re-enabled immediately when the stream errors or closes.
+	const liveRunId = $derived(run?.id ?? null);
+	const liveCorrelationId = $derived(run?.correlationId ?? null);
+	$effect(() => {
+		const currentRunId = liveRunId;
+		const currentCorrelationId = liveCorrelationId;
+		const live = effectiveLive;
+		if (!currentRunId || !currentCorrelationId || !live) {
+			streamConnected = false;
+			streamUnavailable = false;
+			return;
+		}
+		if (typeof EventSource === 'undefined') {
+			streamConnected = false;
+			streamUnavailable = true;
+			return;
+		}
+
+		const source = new EventSource(`/api/discovery-runs/${currentRunId}/events`);
+		let disposed = false;
+		const handleEvent = (event: Event) => {
+			if (disposed) {
+				return;
+			}
+			const message = event as MessageEvent<string>;
+			const progress = parseDiscoveryEvent(message.type, message.data);
+			if (
+				!progress ||
+				progress.runId !== currentRunId ||
+				progress.correlationId !== currentCorrelationId
+			) {
+				return;
+			}
+			// The API remains authoritative; an event only prompts a fresh
+			// server load, so a malformed/stale message cannot mutate state.
+			void invalidate('app:discovery-run');
+			if (progress.type === 'discovery.completed') {
+				streamConnected = false;
+				source.close();
+			}
+		};
+
+		for (const eventType of DISCOVERY_EVENT_TYPES) {
+			source.addEventListener(eventType, handleEvent);
+		}
+		source.onopen = () => {
+			if (!disposed) {
+				streamConnected = true;
+				streamUnavailable = false;
+			}
+		};
+		source.onerror = () => {
+			if (!disposed) {
+				streamConnected = false;
+				streamUnavailable = true;
+				source.close();
+			}
+		};
+
+		return () => {
+			disposed = true;
+			source.close();
+			streamConnected = false;
+		};
+	});
 
 	const failureCounts = $derived.by(() => {
 		const counts: Record<string, number> = Object.create(null);
@@ -85,7 +157,7 @@
 	// Use sticky live so transient unreachable does not kill polling.
 	const attachPolling: Attachment = () =>
 		startDiscoveryRunPolling(
-			() => ({ live: effectiveLive, reachable: data.runState.apiReachable }),
+			() => ({ live: effectivePollingLive, reachable: data.runState.apiReachable }),
 			() => {
 				void invalidate('app:discovery-run');
 			}
@@ -128,6 +200,17 @@
 			role="alert"
 		>
 			{data.runState.detail}
+		</p>
+	{/if}
+	{#if effectiveLive}
+		<p class="text-xs text-muted-foreground" role="status" data-testid="progress-transport">
+			{#if streamConnected}
+				Live progress connected
+			{:else if streamUnavailable}
+				Live progress unavailable — polling fallback active
+			{:else}
+				Connecting to live progress…
+			{/if}
 		</p>
 	{/if}
 

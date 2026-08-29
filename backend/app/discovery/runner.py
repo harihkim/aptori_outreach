@@ -36,6 +36,8 @@ from app.auditing.service import record_audit
 from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.discovery import cli
+from app.discovery import events as progress_events
+from app.discovery.events import ProgressEvent
 from app.discovery.models import (
     FAILURE_CLASSES,
     RUN_COST_STATUSES,
@@ -94,8 +96,21 @@ class _Claim:
     """Plan snapshot taken under the claim lock, reused outside the tx."""
 
     run_id: uuid.UUID
+    workspace_id: uuid.UUID
     planned_ids: tuple[str, ...]
     entry: dict[str, Any]
+    started: bool
+
+
+@dataclass(frozen=True)
+class _Settlement:
+    """Committed result of one attempt, including what progress to publish."""
+
+    status: str
+    recorded: bool
+    completed: bool
+    observation: RetrievalObservation | None = None
+    metrics: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -410,7 +425,7 @@ def _roll_up_run(
     run: DiscoveryRun,
     planned_ids: tuple[str, ...],
     correlation_id: str,
-) -> None:
+) -> bool:
     """Recount observations under lock and close the run when complete.
 
     Only observations whose query_id appears in method_plan['queries'] count
@@ -431,9 +446,9 @@ def _roll_up_run(
         )
     )
     if len(rows) < len(planned_ids):
-        return
+        return False
     if run.status in TERMINAL_RUN_STATUSES:
-        return
+        return False
 
     previous_status = run.status
     statuses = [row.status for row in rows]
@@ -477,6 +492,7 @@ def _roll_up_run(
         after={"status": final_status},
         correlation_id=correlation_id,
     )
+    return True
 
 
 def _claim_run(
@@ -503,9 +519,11 @@ def _claim_run(
 
         # Idempotent lifecycle transition: only the first invocation moves
         # the run out of queued and writes the start audit event.
+        started = False
         if run.status == "queued":
             run.status = "running"
             run.started_at = _now()
+            started = True
             record_audit(
                 session,
                 actor="worker",
@@ -572,7 +590,13 @@ def _claim_run(
         # absent from the plan, so a claimed invocation always carries one.
         if entry is None:
             raise ValueError("invariant violation: claimed entry is None")
-        return "claimed", _Claim(run_id=run_id, planned_ids=planned_ids, entry=entry)
+        return "claimed", _Claim(
+            run_id=run_id,
+            workspace_id=run.workspace_id,
+            planned_ids=planned_ids,
+            entry=entry,
+            started=started,
+        )
 
 
 async def _spawn_attempt(
@@ -609,20 +633,20 @@ def _settle_run(
     correlation_id: str,
     outcome: _AttemptOutcome,
     planned_ids: tuple[str, ...],
-) -> str:
+) -> _Settlement:
     """Phase 3: single final transaction inserts and closes the run."""
     with manager.session_factory() as session, session.begin():
         run = session.execute(
             select(DiscoveryRun).where(DiscoveryRun.id == run_id).with_for_update()
         ).scalar_one_or_none()
         if run is None:
-            return "run_missing"
+            return _Settlement(status="run_missing", recorded=False, completed=False)
 
         # Terminal runs must not be mutated — late arrivals observe
         # already_done instead of appending evidence that diverges from
         # frozen metrics. See runner invariant at top of module.
         if run.status in TERMINAL_RUN_STATUSES:
-            return "already_done"
+            return _Settlement(status="already_done", recorded=False, completed=False)
 
         # Authoritative replay guard: skip the insert entirely when another
         # invocation already recorded this pair.
@@ -633,16 +657,94 @@ def _settle_run(
             )
         ).scalar_one_or_none()
         if already_recorded is not None:
-            return run.status
+            return _Settlement(status=run.status, recorded=False, completed=False)
 
-        session.add(
-            _outcome_to_row(
-                run, query_id, correlation_id, Path(outcome.evidence_directory), outcome
-            )
+        observation = _outcome_to_row(
+            run, query_id, correlation_id, Path(outcome.evidence_directory), outcome
         )
+        session.add(observation)
         session.flush()
-        _roll_up_run(session, run, planned_ids, correlation_id)
-        return run.status
+        completed = _roll_up_run(session, run, planned_ids, correlation_id)
+        return _Settlement(
+            status=run.status,
+            recorded=True,
+            completed=completed,
+            observation=observation,
+            metrics=run.metrics,
+        )
+
+
+async def _publish_progress(
+    *,
+    event_type: str,
+    run_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    correlation_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Publish one already-committed progress notification."""
+    await progress_events.publish_progress_event(
+        ProgressEvent.create(
+            event_type=event_type,
+            run_id=run_id,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+    )
+
+
+async def _publish_attempt_progress(
+    claim: _Claim,
+    correlation_id: str,
+    settlement: _Settlement,
+) -> None:
+    """Publish observation/candidate/completion events in wire order."""
+    observation = settlement.observation
+    if observation is None:
+        return
+
+    for candidate in observation.candidates:
+        if not isinstance(candidate, dict):
+            continue
+        await _publish_progress(
+            event_type="discovery.candidate_found",
+            run_id=claim.run_id,
+            workspace_id=claim.workspace_id,
+            correlation_id=correlation_id,
+            payload={
+                "query_id": observation.query_id,
+                "observation_id": observation.observation_id,
+                "candidate": candidate,
+            },
+        )
+
+    await _publish_progress(
+        event_type="retrieval.observed",
+        run_id=claim.run_id,
+        workspace_id=claim.workspace_id,
+        correlation_id=correlation_id,
+        payload={
+            "query_id": observation.query_id,
+            "observation_id": observation.observation_id,
+            "status": observation.status,
+            "candidate_count": observation.candidate_count,
+            "failure_class": observation.failure_class,
+            "elapsed_ms": observation.elapsed_ms,
+        },
+    )
+
+    if settlement.completed:
+        await _publish_progress(
+            event_type="discovery.completed",
+            run_id=claim.run_id,
+            workspace_id=claim.workspace_id,
+            correlation_id=correlation_id,
+            payload={
+                "status": settlement.status,
+                "metrics": settlement.metrics,
+            },
+        )
 
 
 async def run_discovery_query(
@@ -669,9 +771,21 @@ async def run_discovery_query(
         if marker != "claimed" or claim is None:
             return marker
 
+        if claim.started:
+            await _publish_progress(
+                event_type="discovery.started",
+                run_id=claim.run_id,
+                workspace_id=claim.workspace_id,
+                correlation_id=correlation_id,
+                payload={
+                    "status": "running",
+                    "planned_query_count": len(claim.planned_ids),
+                },
+            )
+
         outcome = await _spawn_attempt(query_id, claim, _resolve_config())
 
-        return _settle_run(
+        settlement = _settle_run(
             manager,
             uuid.UUID(run_id),
             query_id,
@@ -679,5 +793,8 @@ async def run_discovery_query(
             outcome,
             claim.planned_ids,
         )
+        if settlement.recorded:
+            await _publish_attempt_progress(claim, correlation_id, settlement)
+        return settlement.status
     finally:
         manager.dispose()

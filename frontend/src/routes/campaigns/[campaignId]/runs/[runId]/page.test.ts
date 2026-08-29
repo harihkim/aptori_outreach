@@ -87,6 +87,40 @@ function hash(value: string): number {
 
 let observationCounter = 0;
 
+class FakeEventSource {
+	static instances: FakeEventSource[] = [];
+	readonly url: string;
+	onopen: (() => void) | null = null;
+	onerror: (() => void) | null = null;
+	private listeners = new Map<string, (event: Event) => void>();
+	closed = false;
+
+	constructor(url: string) {
+		this.url = url;
+		FakeEventSource.instances.push(this);
+	}
+
+	addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+		this.listeners.set(type, listener as (event: Event) => void);
+	}
+
+	close(): void {
+		this.closed = true;
+	}
+
+	open(): void {
+		this.onopen?.();
+	}
+
+	fail(): void {
+		this.onerror?.();
+	}
+
+	emit(type: string, data: string): void {
+		this.listeners.get(type)?.({ type, data } as MessageEvent<string>);
+	}
+}
+
 function pageData(
 	runBodyValue: DiscoveryRunBody,
 	items: unknown[] = [],
@@ -127,6 +161,7 @@ function unreachablePageData(runBodyValue: DiscoveryRunBody) {
 
 afterEach(() => {
 	vi.useRealTimers();
+	vi.unstubAllGlobals();
 	cleanup();
 });
 
@@ -135,6 +170,52 @@ beforeEach(() => {
 });
 
 describe('discovery run page', () => {
+	it('connects live progress through the same-origin SSE stream', () => {
+		vi.stubGlobal('EventSource', FakeEventSource);
+		FakeEventSource.instances = [];
+		render(Page, { data: pageData(runBody({ status: 'running' })) });
+		const source = FakeEventSource.instances[0];
+		expect(source.url).toBe(
+			'/api/discovery-runs/6a9a2f0e-2222-4bbb-8ccc-000000000002/events'
+		);
+
+		source.open();
+		flushSync();
+		expect(screen.getByTestId('progress-transport')).toHaveTextContent(
+			'Live progress connected'
+		);
+		source.emit(
+			'discovery.started',
+			JSON.stringify({
+				id: 'event-1',
+				type: 'discovery.started',
+				run_id: '6a9a2f0e-2222-4bbb-8ccc-000000000002',
+				workspace_id: '00000000-0000-0000-0000-000000000001',
+				correlation_id: 'corr1234567890ab',
+				occurred_at: '2026-08-30T10:00:00Z',
+				payload: { status: 'running' }
+			})
+		);
+		expect(invalidate).toHaveBeenCalledWith('app:discovery-run');
+	});
+
+	it('closes a failed stream and leaves the polling fallback active', async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal('EventSource', FakeEventSource);
+		FakeEventSource.instances = [];
+		render(Page, { data: pageData(runBody({ status: 'running' })) });
+		const source = FakeEventSource.instances[0];
+
+		source.fail();
+		flushSync();
+		expect(source.closed).toBe(true);
+		expect(screen.getByTestId('progress-transport')).toHaveTextContent(
+			'polling fallback active'
+		);
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledWith('app:discovery-run');
+	});
+
 	it('shows the run header with status badge and honest cost reporting', () => {
 		render(Page, {
 			data: pageData(runBody({ status: 'running', started_at: '2026-08-23T10:00:00Z' }))

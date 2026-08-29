@@ -11,17 +11,21 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from app.deps import get_session
+from app.discovery import events as progress_events
 from app.discovery import router as discovery_router
 from app.discovery import service as discovery_service
+from app.discovery.events import ProgressEvent
 from app.main import create_app
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import admin_database_url, configured_database_url
@@ -131,6 +135,43 @@ class FakeEnqueue:
             raise RuntimeError("redis unavailable")
 
 
+class FakeEventBus:
+    """Finite event stream used to exercise the FastAPI SSE boundary."""
+
+    def __init__(self, events: list[ProgressEvent | None]) -> None:
+        self.events = events
+        self.subscribed_run_ids: list[uuid.UUID] = []
+
+    async def publish(self, event: ProgressEvent) -> None:
+        del event
+
+    async def subscribe(
+        self, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        self.subscribed_run_ids.append(run_id)
+        for event in self.events:
+            yield event
+
+
+class SessionObservingEventBus:
+    """Record owned lookup-session state before the stream begins waiting."""
+
+    def __init__(self, event: ProgressEvent, session_state: dict[str, bool]) -> None:
+        self.event = event
+        self.session_state = session_state
+        self.closed_when_subscribed: bool | None = None
+
+    async def publish(self, event: ProgressEvent) -> None:
+        del event
+
+    async def subscribe(
+        self, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        del run_id
+        self.closed_when_subscribed = self.session_state["closed"]
+        yield self.event
+
+
 @pytest.fixture()
 def fake_enqueue(monkeypatch: pytest.MonkeyPatch) -> FakeEnqueue:
     fake = FakeEnqueue()
@@ -181,6 +222,100 @@ def started_run(
     assert response.status_code == 201
     body = response.json()
     return body, campaign["id"]
+
+
+def test_run_events_streams_correlated_events_and_keepalive(
+    api: TestClient,
+    fake_enqueue: FakeEnqueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = uuid.UUID(body["id"])
+    workspace_id = uuid.UUID(body["workspace_id"])
+    correlation_id = body["correlation_id"]
+
+    def progress(event_type: str, payload: dict[str, object]) -> ProgressEvent:
+        return ProgressEvent.create(
+            event_type=event_type,
+            run_id=run_id,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+
+    bus = FakeEventBus(
+        [
+            None,
+            progress("discovery.started", {"status": "running"}),
+            progress("discovery.candidate_found", {"query_id": "q-a"}),
+            progress("retrieval.observed", {"query_id": "q-a", "status": "success"}),
+            progress("discovery.completed", {"status": "succeeded"}),
+        ]
+    )
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+
+    with api.stream("GET", f"/discovery-runs/{run_id}/events") as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        raw = response.read().decode()
+
+    assert ": keepalive" in raw
+    assert "event: discovery.started" in raw
+    assert "event: discovery.candidate_found" in raw
+    assert "event: retrieval.observed" in raw
+    assert "event: discovery.completed" in raw
+    assert '"correlation_id": "' + correlation_id + '"' in raw
+    assert bus.subscribed_run_ids == [run_id]
+
+
+def test_run_events_releases_request_session_before_subscribing(
+    api: TestClient,
+    fake_enqueue: FakeEnqueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked event subscription must not pin the lookup connection."""
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = uuid.UUID(body["id"])
+    workspace_id = uuid.UUID(body["workspace_id"])
+    correlation_id = body["correlation_id"]
+    session_state = {"closed": False}
+    app = cast(FastAPI, api.app)
+
+    class TrackingSession(Session):
+        def close(self) -> None:
+            session_state["closed"] = True
+            super().close()
+
+    def tracked_session_factory() -> TrackingSession:
+        return TrackingSession(
+            bind=app.state.database.engine,
+            future=True,
+            expire_on_commit=False,
+        )
+
+    def forbidden_get_session() -> Iterator[Session]:
+        raise AssertionError("SSE must not use the request session dependency")
+
+    monkeypatch.setattr(
+        app.state.database, "session_factory", tracked_session_factory
+    )
+    monkeypatch.setitem(app.dependency_overrides, get_session, forbidden_get_session)
+    completed = ProgressEvent.create(
+        event_type="discovery.completed",
+        run_id=run_id,
+        workspace_id=workspace_id,
+        correlation_id=correlation_id,
+        payload={"status": "succeeded"},
+    )
+    bus = SessionObservingEventBus(completed, session_state)
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+
+    with api.stream("GET", f"/discovery-runs/{run_id}/events") as response:
+        assert response.status_code == 200
+        response.read()
+
+    assert bus.closed_when_subscribed is True
+    assert session_state["closed"] is True
 
 
 def test_start_on_active_campaign_returns_queued_frozen_plan(

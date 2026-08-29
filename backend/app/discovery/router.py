@@ -1,15 +1,24 @@
-"""HTTP boundary for discovery runs and their observations."""
+"""HTTP boundary for discovery runs, observations, and live progress."""
 
-from collections.abc import Callable
+import logging
+from collections.abc import AsyncIterator, Callable
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from app.auth import Principal
 from app.config import get_settings
 from app.deps import PrincipalDep, SessionDep, WorkspaceDep
+from app.discovery import events as progress_events
 from app.discovery import queue, service
+from app.discovery.events import ProgressEvent
+from app.discovery.models import DiscoveryRun
 from app.discovery.schemas import (
     DiscoveryMethodPlan,
     DiscoveryRunCreate,
@@ -21,7 +30,21 @@ from app.discovery.schemas import (
 from app.idempotency import service as idempotency
 from app.pagination import InvalidCursor
 
+TERMINAL_RUN_STATUSES = frozenset({"succeeded", "partial", "failed", "cancelled"})
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["discovery"])
+
+
+@dataclass(frozen=True)
+class _DiscoveryRunSnapshot:
+    """Detached run identity used after the request session is released."""
+
+    id: UUID
+    workspace_id: UUID
+    correlation_id: str
+    status: str
+    metrics: dict[str, object] | None
 
 _AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
@@ -108,6 +131,99 @@ def get_discovery_run(
     except service.DiscoveryRunNotFound:
         raise _run_not_found() from None
     return DiscoveryRunResponse.model_validate(run)
+
+
+def _snapshot_run(run: DiscoveryRun) -> _DiscoveryRunSnapshot:
+    """Copy only the run fields needed by the long-lived event stream."""
+    return _DiscoveryRunSnapshot(
+        id=run.id,
+        workspace_id=run.workspace_id,
+        correlation_id=run.correlation_id,
+        status=run.status,
+        metrics=deepcopy(run.metrics),
+    )
+
+
+def _load_run_snapshot(
+    request: Request, principal: Principal, run_id: UUID
+) -> _DiscoveryRunSnapshot:
+    """Read one detached snapshot in an owned, short-lived session."""
+    with request.app.state.database.session_factory() as session:
+        return _snapshot_run(service.get_discovery_run(session, principal, run_id))
+
+
+@router.get(
+    "/discovery-runs/{run_id}/events",
+    response_class=EventSourceResponse,
+    responses={
+        **_AUTH_RESPONSES,
+        404: {"model": ErrorResponse, "description": "Discovery run not found."},
+    },
+)
+async def stream_discovery_events(
+    request: Request,
+    run_id: Annotated[UUID, Path()],
+    principal: PrincipalDep,
+) -> AsyncIterator[ServerSentEvent]:
+    """Stream authenticated, run-scoped progress until discovery completes.
+
+    Each database snapshot runs in a thread-owned, short-lived session before
+    the response waits on the bus. An unknown or foreign run therefore
+    receives the same policy-safe 404 as the REST read. Redis is only a
+    notification transport: every event is filtered against the authorized
+    run and the stream ends on the durable completion event.
+    """
+    try:
+        run = await run_in_threadpool(_load_run_snapshot, request, principal, run_id)
+    except service.DiscoveryRunNotFound:
+        raise _run_not_found() from None
+
+    if run.status in TERMINAL_RUN_STATUSES:
+        # A viewer that connects after completion still gets a finite,
+        # self-describing stream rather than waiting forever for pub/sub.
+        yield ProgressEvent.create(
+            event_type="discovery.completed",
+            run_id=run.id,
+            workspace_id=run.workspace_id,
+            correlation_id=run.correlation_id,
+            payload={"status": run.status, "metrics": run.metrics},
+        ).as_sse()
+        return
+
+    try:
+        async for event in progress_events.get_event_bus().subscribe(run.id):
+            if await request.is_disconnected():
+                break
+            if event is None:
+                # If publication was interrupted after the durable state
+                # changed, do not leave a connected viewer stale forever.
+                latest = await run_in_threadpool(
+                    _load_run_snapshot, request, principal, run.id
+                )
+                if latest.status in TERMINAL_RUN_STATUSES:
+                    yield ProgressEvent.create(
+                        event_type="discovery.completed",
+                        run_id=latest.id,
+                        workspace_id=latest.workspace_id,
+                        correlation_id=latest.correlation_id,
+                        payload={"status": latest.status, "metrics": latest.metrics},
+                    ).as_sse()
+                    break
+                yield ServerSentEvent(comment="keepalive")
+                continue
+            # Redis channels are already run-scoped; these checks keep an
+            # injected/test bus from becoming an accidental cross-run data path.
+            if (
+                event.run_id != run.id
+                or event.workspace_id != run.workspace_id
+                or event.correlation_id != run.correlation_id
+            ):
+                continue
+            yield event.as_sse()
+            if event.type == "discovery.completed":
+                break
+    except Exception:  # noqa: BLE001 - stream failure activates frontend fallback
+        logger.warning("discovery progress stream unavailable", exc_info=True)
 
 
 @router.get(

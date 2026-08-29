@@ -16,7 +16,7 @@ This is the semantic application-facing contract. FastAPI/Pydantic models will b
 | Review | `GET /reviews/pending`; `POST /approvals`; `POST /approvals/{id}/revoke`; `POST /draft-versions/{id}/rejections` |
 | Media | Later: `POST /media/jobs`; `GET /media/jobs/{id}`; `POST /webhooks/higgsfield` |
 | Publishing | `POST /publish-preparations`; `GET /publish-preparations/{id}` |
-| Events | `GET /events/stream` for retrieval, analysis, drafting, review, browser, and media progress |
+| Events | `GET /discovery-runs/{run_id}/events` for authenticated run-scoped retrieval progress; later event families reuse the same stream envelope |
 
 ## Draft contract
 
@@ -113,11 +113,19 @@ The prototype has no automatic-submit endpoint. A successful preparation ends at
 
 ## SSE event families
 
+`GET /discovery-runs/{run_id}/events` is authenticated like the REST reads and
+returns `text/event-stream`. Each event carries a standard SSE `id` and
+`event` field. Its JSON `data` envelope contains the event `type`, `run_id`,
+`workspace_id`, `correlation_id`, UTC `occurred_at`, and a typed-by-family
+`payload`. Keepalive comments are emitted while a run is quiet. The stream is
+scoped to one authorized run and ends after `discovery.completed`; PostgreSQL
+run/observation state remains authoritative if a client reconnects.
+
 ```text
 discovery.started
 discovery.candidate_found
-discovery.completed
 retrieval.observed
+discovery.completed
 conversation.normalized
 analysis.completed
 draft.version_created

@@ -15,7 +15,7 @@ import inspect
 import json
 import textwrap
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +29,8 @@ from sqlalchemy.orm import Session
 from app.auditing.models import AuditEvent
 from app.campaigns.models import Campaign
 from app.config import get_settings
+from app.discovery import events as progress_events
+from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.discovery.observations import STATUS_VALUES
 from app.discovery.runner import _parse_iso, run_discovery_query
@@ -159,6 +161,23 @@ class StubHarness:
         mp.setenv("APTORI_RETRIEVAL_INPUT_SCRATCH_ROOT", str(self.input_root))
         mp.setenv("APTORI_RETRIEVAL_ATTEMPT_TIMEOUT_SECONDS", str(self.timeout_seconds))
         get_settings.cache_clear()
+
+
+class RecordingEventBus:
+    """Capture worker progress without requiring Redis."""
+
+    def __init__(self) -> None:
+        self.events: list[ProgressEvent] = []
+
+    async def publish(self, event: ProgressEvent) -> None:
+        self.events.append(event)
+
+    async def subscribe(
+        self, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        del run_id
+        if False:
+            yield None
 
 
 @pytest.fixture()
@@ -459,6 +478,31 @@ def test_correlation_id_flows_to_observations_and_audit(
     )
     assert completed.before == {"status": "running"}
     assert completed.after == {"status": "succeeded"}
+
+
+def test_worker_publishes_live_progress_after_persisting_observation(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-events", query_ids=["q-a"])
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+
+    assert invoke(run_id, "q-a", correlation_id="corr-events") == "succeeded"
+
+    assert [item.type for item in bus.events] == [
+        "discovery.started",
+        "discovery.candidate_found",
+        "retrieval.observed",
+        "discovery.completed",
+    ]
+    assert all(item.run_id == run_id for item in bus.events)
+    assert all(item.correlation_id == "corr-events" for item in bus.events)
+    assert bus.events[1].payload["query_id"] == "q-a"
+    assert bus.events[2].payload["status"] == "success"
+    assert bus.events[3].payload["status"] == "succeeded"
 
 
 def test_timeout_without_disk_evidence_classifies_transport_timeout(
