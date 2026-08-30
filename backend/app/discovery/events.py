@@ -13,9 +13,9 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -128,6 +128,38 @@ def event_channel(run_id: uuid.UUID) -> str:
     return f"{EVENT_CHANNEL_PREFIX}:{run_id}"
 
 
+class _RedisPubSub(Protocol):
+    """Typed subset of redis-py's pub/sub surface used by this adapter."""
+
+    async def subscribe(self, channel: str) -> object: ...
+
+    async def get_message(
+        self, *, ignore_subscribe_messages: bool, timeout: float
+    ) -> dict[str, Any] | None: ...
+
+    async def unsubscribe(self, channel: str) -> object: ...
+
+    async def aclose(self) -> None: ...
+
+
+class _RedisClient(Protocol):
+    """Typed subset of redis-py's async client used by this adapter."""
+
+    async def publish(self, channel: str, message: str) -> object: ...
+
+    def pubsub(self) -> _RedisPubSub: ...
+
+    async def aclose(self) -> None: ...
+
+
+def _redis_from_url(redis_url: str) -> _RedisClient:
+    """Create a typed client through redis-py's unannotated convenience API."""
+    from redis.asyncio import from_url
+
+    typed_from_url = cast(Callable[..., _RedisClient], from_url)
+    return typed_from_url(redis_url, decode_responses=True)
+
+
 class InMemoryEventBus:
     """Small event bus for deterministic tests and local development."""
 
@@ -171,18 +203,14 @@ class RedisEventBus:
         self.heartbeat_seconds = heartbeat_seconds
 
     async def publish(self, event: ProgressEvent) -> None:
-        from redis.asyncio import from_url
-
-        client = from_url(self.redis_url, decode_responses=True)
+        client = _redis_from_url(self.redis_url)
         try:
             await client.publish(event_channel(event.run_id), event.model_dump_json())
         finally:
             await client.aclose()
 
     async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
-        from redis.asyncio import from_url
-
-        client = from_url(self.redis_url, decode_responses=True)
+        client = _redis_from_url(self.redis_url)
         pubsub = client.pubsub()
         channel = event_channel(run_id)
         try:
