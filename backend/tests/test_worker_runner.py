@@ -1087,7 +1087,13 @@ def test_worker_settings_registers_the_plain_runner() -> None:
 
     assert WorkerSettings.functions == [run_discovery_query]
     parameters = inspect.signature(run_discovery_query).parameters
-    assert list(parameters) == ["ctx", "run_id", "correlation_id", "query_id"]
+    assert list(parameters) == [
+        "ctx",
+        "workspace_id",
+        "run_id",
+        "correlation_id",
+        "query_id",
+    ]
     assert "overrides" not in parameters
     assert "allow_overrides" not in parameters
     assert isinstance(WorkerSettings.redis_settings, RedisSettings)
