@@ -35,12 +35,16 @@ class QueueEnqueueError(RuntimeError):
 
 
 async def enqueue_discovery_queries(
-    run_id: uuid.UUID, correlation_id: str, query_ids: list[str]
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    correlation_id: str,
+    query_ids: list[str],
 ) -> list[str]:
     """Enqueue one idempotent job per query; returns the deterministic ids.
 
-    Job identity is f'discovery:{run_id}:{query_id}', so re-enqueueing the
-    same run/query pair cannot produce duplicate work.
+    Job identity is f'discovery:{workspace_id}:{run_id}:{query_id}', so
+    re-enqueueing the same Workspace/run/query tuple cannot produce duplicate
+    work or collide with another Workspace's run identifiers.
     """
     from arq import create_pool
     from arq.connections import RedisSettings
@@ -51,10 +55,11 @@ async def enqueue_discovery_queries(
         enqueued_ids: list[str] = []
         failed: dict[str, str] = {}
         for query_id in query_ids:
-            job_id = f"discovery:{run_id}:{query_id}"
+            job_id = f"discovery:{workspace_id}:{run_id}:{query_id}"
             try:
                 await pool.enqueue_job(
                     "run_discovery_query",
+                    workspace_id=str(workspace_id),
                     run_id=str(run_id),
                     correlation_id=correlation_id,
                     query_id=query_id,

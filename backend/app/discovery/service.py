@@ -36,7 +36,7 @@ PlanLoader = Callable[[], DiscoveryMethodPlan]
 # The production adapter (queue.enqueue_discovery_queries) is async; the port
 # is async-only by design — no sync-or-coroutine speculation. Coroutine is
 # required (not just Awaitable) because the service drives it via asyncio.run.
-Enqueue = Callable[[UUID, str, list[str]], Coroutine[Any, Any, object]]
+Enqueue = Callable[[UUID, UUID, str, list[str]], Coroutine[Any, Any, object]]
 
 
 class WorkspaceAccessDenied(PermissionError):
@@ -216,6 +216,7 @@ def start_discovery_run(
     try:
         asyncio.run(
             enqueue(
+                workspace_id,
                 UUID(body["id"]),
                 body["correlation_id"],
                 [q["id"] for q in body["method_plan"]["queries"]],
@@ -230,10 +231,16 @@ def start_discovery_run(
 
 
 def get_discovery_run(
-    session: Session, principal: Principal, run_id: UUID
+    session: Session, principal: Principal, workspace_id: UUID, run_id: UUID
 ) -> DiscoveryRun:
-    run = session.get(DiscoveryRun, run_id)
-    if run is None or not principal.can_access(run.workspace_id):
+    _require_workspace_access(principal, workspace_id)
+    run = session.scalar(
+        select(DiscoveryRun).where(
+            DiscoveryRun.workspace_id == workspace_id,
+            DiscoveryRun.id == run_id,
+        )
+    )
+    if run is None:
         # Foreign workspaces cannot even confirm a run exists.
         raise DiscoveryRunNotFound(str(run_id))
     return run
@@ -242,14 +249,16 @@ def get_discovery_run(
 def list_run_observations(
     session: Session,
     principal: Principal,
+    workspace_id: UUID,
     run_id: UUID,
     *,
     limit: int,
     cursor: str | None,
 ) -> tuple[list[RetrievalObservation], str | None]:
-    run = get_discovery_run(session, principal, run_id)
+    run = get_discovery_run(session, principal, workspace_id, run_id)
     statement = select(RetrievalObservation).where(
-        RetrievalObservation.discovery_run_id == run.id
+        RetrievalObservation.workspace_id == workspace_id,
+        RetrievalObservation.discovery_run_id == run.id,
     )
     if cursor is not None:
         statement = statement.where(

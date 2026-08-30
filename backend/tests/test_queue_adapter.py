@@ -22,6 +22,7 @@ from app.discovery.runner import run_discovery_query
 from app.discovery.worker import WorkerSettings
 
 RUN_ID = uuid.UUID("00000000-0000-0000-0000-00000000c101")
+WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-00000000c001")
 CORRELATION_ID = "corr-queue-fanout"
 QUERY_IDS = [
     "q01-api-security-broad",
@@ -64,11 +65,13 @@ def stub_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[StubPool]:
 
 
 def expected_job_id(query_id: str) -> str:
-    return f"discovery:{RUN_ID}:{query_id}"
+    return f"discovery:{WORKSPACE_ID}:{RUN_ID}:{query_id}"
 
 
 def test_fanout_enqueues_one_job_per_query_and_closes_pool(stub_pool: StubPool) -> None:
-    job_ids = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+    job_ids = asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
 
     assert job_ids == [expected_job_id(qid) for qid in QUERY_IDS]
     assert len(stub_pool.calls) == len(QUERY_IDS)
@@ -78,26 +81,43 @@ def test_fanout_enqueues_one_job_per_query_and_closes_pool(stub_pool: StubPool) 
 
 def test_job_ids_are_deterministic_per_frozen_query(stub_pool: StubPool) -> None:
     """Same inputs produce identical ids; distinct queries never collide."""
-    first = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
-    second = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+    first = asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
+    second = asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
 
     assert first == second
     assert len(set(first)) == len(QUERY_IDS)
     for query_id in QUERY_IDS:
-        assert f"discovery:{RUN_ID}:{query_id}" in first
+        assert f"discovery:{WORKSPACE_ID}:{RUN_ID}:{query_id}" in first
     # A different run id must not reuse another run's deterministic ids.
     other_run = uuid.UUID("00000000-0000-0000-0000-00000000c102")
     other = asyncio.run(
-        enqueue_discovery_queries(other_run, CORRELATION_ID, QUERY_IDS[:1])
+        enqueue_discovery_queries(
+            WORKSPACE_ID, other_run, CORRELATION_ID, QUERY_IDS[:1]
+        )
     )
     assert other[0] != first[0]
+
+    # Workspace ownership is part of identity even if IDs are reused.
+    other_workspace = uuid.UUID("00000000-0000-0000-0000-00000000c002")
+    foreign = asyncio.run(
+        enqueue_discovery_queries(
+            other_workspace, RUN_ID, CORRELATION_ID, QUERY_IDS[:1]
+        )
+    )
+    assert foreign[0] != first[0]
 
 
 def test_jobs_target_the_registered_function_with_runner_kwargs(
     stub_pool: StubPool,
 ) -> None:
     """Each job names the worker-registered function and runner kwargs only."""
-    asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+    asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
 
     registered_names = [function.__name__ for function in WorkerSettings.functions]
     runner_params = set(inspect.signature(run_discovery_query).parameters) - {"ctx"}
@@ -108,6 +128,7 @@ def test_jobs_target_the_registered_function_with_runner_kwargs(
         assert call["function"] == "run_discovery_query"
         # Exactly the runner's keyword contract plus arq's job-id knob.
         assert set(call) - {"function"} == runner_params | {"_job_id"}
+        assert call["workspace_id"] == str(WORKSPACE_ID)
         assert call["run_id"] == str(RUN_ID)
         assert call["correlation_id"] == CORRELATION_ID
         assert call["query_id"] == QUERY_IDS[index]
@@ -122,7 +143,9 @@ def test_partial_failure_raises_identifying_failed_and_enqueued(
     stub_pool.fail_query_ids = {failing}
 
     with pytest.raises(QueueEnqueueError) as excinfo:
-        asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+        asyncio.run(
+            enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+        )
 
     error = excinfo.value
     assert error.enqueued == [
@@ -144,7 +167,9 @@ def test_total_failure_reports_every_failed_query_id(stub_pool: StubPool) -> Non
     stub_pool.fail_query_ids = set(QUERY_IDS)
 
     with pytest.raises(QueueEnqueueError) as excinfo:
-        asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+        asyncio.run(
+            enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+        )
 
     error = excinfo.value
     assert error.enqueued == []
@@ -153,8 +178,12 @@ def test_total_failure_reports_every_failed_query_id(stub_pool: StubPool) -> Non
 
 def test_replay_enqueues_identical_job_ids_again(stub_pool: StubPool) -> None:
     """Re-enqueueing the same run/query pair reuses the same job ids."""
-    first = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
-    second = asyncio.run(enqueue_discovery_queries(RUN_ID, CORRELATION_ID, QUERY_IDS))
+    first = asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
+    second = asyncio.run(
+        enqueue_discovery_queries(WORKSPACE_ID, RUN_ID, CORRELATION_ID, QUERY_IDS)
+    )
 
     assert first == second
     both_batches = [call["_job_id"] for call in stub_pool.calls]

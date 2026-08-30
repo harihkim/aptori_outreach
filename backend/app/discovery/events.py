@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, cast
 
@@ -119,13 +119,15 @@ class EventBus(Protocol):
     async def publish(self, event: ProgressEvent) -> None:
         """Publish one event after its domain transaction has committed."""
 
-    def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
-        """Yield events for a run; ``None`` is a keepalive tick."""
+    def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        """Yield events for one Workspace/run pair; ``None`` is a keepalive."""
 
 
-def event_channel(run_id: uuid.UUID) -> str:
-    """Return a run-scoped channel; a client can never subscribe globally."""
-    return f"{EVENT_CHANNEL_PREFIX}:{run_id}"
+def event_channel(workspace_id: uuid.UUID, run_id: uuid.UUID) -> str:
+    """Return a channel scoped to both Workspace and discovery run."""
+    return f"{EVENT_CHANNEL_PREFIX}:{workspace_id}:{run_id}"
 
 
 class _RedisPubSub(Protocol):
@@ -165,15 +167,21 @@ class InMemoryEventBus:
 
     def __init__(self, *, heartbeat_seconds: float = HEARTBEAT_SECONDS) -> None:
         self.heartbeat_seconds = heartbeat_seconds
-        self._subscribers: dict[uuid.UUID, set[asyncio.Queue[ProgressEvent]]] = {}
+        self._subscribers: dict[
+            tuple[uuid.UUID, uuid.UUID], set[asyncio.Queue[ProgressEvent]]
+        ] = {}
 
     async def publish(self, event: ProgressEvent) -> None:
-        for subscriber in tuple(self._subscribers.get(event.run_id, ())):
+        key = (event.workspace_id, event.run_id)
+        for subscriber in tuple(self._subscribers.get(key, ())):
             subscriber.put_nowait(event)
 
-    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncGenerator[ProgressEvent | None, None]:
+        key = (workspace_id, run_id)
         subscriber: asyncio.Queue[ProgressEvent] = asyncio.Queue()
-        self._subscribers.setdefault(run_id, set()).add(subscriber)
+        self._subscribers.setdefault(key, set()).add(subscriber)
         try:
             while True:
                 try:
@@ -183,11 +191,11 @@ class InMemoryEventBus:
                 except TimeoutError:
                     yield None
         finally:
-            subscribers = self._subscribers.get(run_id)
+            subscribers = self._subscribers.get(key)
             if subscribers is not None:
                 subscribers.discard(subscriber)
                 if not subscribers:
-                    self._subscribers.pop(run_id, None)
+                    self._subscribers.pop(key, None)
 
 
 class RedisEventBus:
@@ -205,14 +213,18 @@ class RedisEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         client = _redis_from_url(self.redis_url)
         try:
-            await client.publish(event_channel(event.run_id), event.model_dump_json())
+            await client.publish(
+                event_channel(event.workspace_id, event.run_id), event.model_dump_json()
+            )
         finally:
             await client.aclose()
 
-    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncGenerator[ProgressEvent | None, None]:
         client = _redis_from_url(self.redis_url)
         pubsub = client.pubsub()
-        channel = event_channel(run_id)
+        channel = event_channel(workspace_id, run_id)
         try:
             await pubsub.subscribe(channel)
             while True:
@@ -229,7 +241,7 @@ class RedisEventBus:
                 if not isinstance(raw_data, str):
                     continue
                 try:
-                    yield ProgressEvent.model_validate(json.loads(raw_data))
+                    event = ProgressEvent.model_validate(json.loads(raw_data))
                 except (TypeError, ValueError, ValidationError) as error:
                     # A malformed message must not terminate every viewer of
                     # this run; the durable database state remains authoritative.
@@ -237,6 +249,11 @@ class RedisEventBus:
                         "discarding malformed discovery progress event (%s)",
                         type(error).__name__,
                     )
+                else:
+                    # Keep the envelope aligned with the channel even when a
+                    # producer publishes a valid event to the wrong channel.
+                    if event.workspace_id == workspace_id and event.run_id == run_id:
+                        yield event
         finally:
             try:
                 await pubsub.unsubscribe(channel)

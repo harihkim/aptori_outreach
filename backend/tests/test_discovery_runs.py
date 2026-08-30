@@ -118,13 +118,18 @@ class FakeEnqueue:
     """Async stand-in for the arq queue port (the port is async-only)."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, list[str]]] = []
+        self.calls: list[tuple[str, str, str, list[str]]] = []
         self.fail_next = False
 
     async def __call__(
-        self, run_id: object, correlation_id: str, query_ids: list[str]
+        self,
+        workspace_id: object,
+        run_id: object,
+        correlation_id: str,
+        query_ids: list[str],
     ) -> None:
-        call: tuple[str, str, list[str]] = (
+        call: tuple[str, str, str, list[str]] = (
+            str(workspace_id),
             str(run_id),
             correlation_id,
             list(query_ids),
@@ -140,13 +145,15 @@ class FakeEventBus:
 
     def __init__(self, events: list[ProgressEvent | None]) -> None:
         self.events = events
-        self.subscribed_run_ids: list[uuid.UUID] = []
+        self.subscribed_keys: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     async def publish(self, event: ProgressEvent) -> None:
         del event
 
-    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
-        self.subscribed_run_ids.append(run_id)
+    async def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        self.subscribed_keys.append((workspace_id, run_id))
         for event in self.events:
             yield event
 
@@ -162,8 +169,10 @@ class SessionObservingEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         del event
 
-    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
-        del run_id
+    async def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        del workspace_id, run_id
         self.closed_when_subscribed = self.session_state["closed"]
         yield self.event
 
@@ -261,7 +270,7 @@ def test_run_events_streams_correlated_events_and_keepalive(
     assert "event: retrieval.observed" in raw
     assert "event: discovery.completed" in raw
     assert '"correlation_id": "' + correlation_id + '"' in raw
-    assert bus.subscribed_run_ids == [run_id]
+    assert bus.subscribed_keys == [(workspace_id, run_id)]
 
 
 def test_run_events_releases_request_session_before_subscribing(
@@ -352,7 +361,8 @@ def test_start_on_active_campaign_returns_queued_frozen_plan(
 
     # Exactly one enqueue carrying every query id.
     assert len(fake_enqueue.calls) == 1
-    run_id, correlation_id, query_ids = fake_enqueue.calls[0]
+    workspace_id, run_id, correlation_id, query_ids = fake_enqueue.calls[0]
+    assert workspace_id == body["workspace_id"]
     assert run_id == body["id"]
     assert correlation_id == body["correlation_id"]
     assert query_ids == [q["id"] for q in queries]
@@ -537,7 +547,7 @@ def test_enqueue_failure_keeps_committed_run_and_retry_succeeds(
     assert body["status"] == "queued"
     assert body["id"] == str(rows[0][0])
     # Retry re-enqueued deterministically for the same run.
-    assert [call[0] for call in fake_enqueue.calls] == [str(rows[0][0])] * 2
+    assert [call[1] for call in fake_enqueue.calls] == [str(rows[0][0])] * 2
 
     again = start_run(api, campaign["id"], key=key)
     assert again.status_code == 201

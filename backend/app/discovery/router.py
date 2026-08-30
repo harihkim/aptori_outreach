@@ -125,10 +125,11 @@ def start_discovery_run(
 def get_discovery_run(
     run_id: Annotated[UUID, Path()],
     session: SessionDep,
+    workspace: WorkspaceDep,
     principal: PrincipalDep,
 ) -> DiscoveryRunResponse:
     try:
-        run = service.get_discovery_run(session, principal, run_id)
+        run = service.get_discovery_run(session, principal, workspace.id, run_id)
     except service.DiscoveryRunNotFound:
         raise _run_not_found() from None
     return DiscoveryRunResponse.model_validate(run)
@@ -146,11 +147,23 @@ def _snapshot_run(run: DiscoveryRun) -> _DiscoveryRunSnapshot:
 
 
 def _load_run_snapshot(
-    request: Request, principal: Principal, run_id: UUID
+    request: Request, principal: Principal, workspace_id: UUID, run_id: UUID
 ) -> _DiscoveryRunSnapshot:
     """Read one detached snapshot in an owned, short-lived session."""
     with request.app.state.database.session_factory() as session:
-        return _snapshot_run(service.get_discovery_run(session, principal, run_id))
+        return _snapshot_run(
+            service.get_discovery_run(session, principal, workspace_id, run_id)
+        )
+
+
+def _authenticated_workspace_id(principal: Principal) -> UUID:
+    """Return the sole authenticated Workspace without holding a DB session."""
+    if len(principal.workspace_ids) != 1:
+        # The current bearer-token contract authenticates one default
+        # Workspace. A future multi-Workspace token must add an explicit route
+        # selector rather than making an SSE URL ambiguous.
+        raise _forbidden()
+    return next(iter(principal.workspace_ids))
 
 
 @router.get(
@@ -174,8 +187,11 @@ async def stream_discovery_events(
     notification transport: every event is filtered against the authorized
     run and the stream ends on the durable completion event.
     """
+    workspace_id = _authenticated_workspace_id(principal)
     try:
-        run = await run_in_threadpool(_load_run_snapshot, request, principal, run_id)
+        run = await run_in_threadpool(
+            _load_run_snapshot, request, principal, workspace_id, run_id
+        )
     except service.DiscoveryRunNotFound:
         raise _run_not_found() from None
 
@@ -192,14 +208,16 @@ async def stream_discovery_events(
         return
 
     try:
-        async for event in progress_events.get_event_bus().subscribe(run.id):
+        async for event in progress_events.get_event_bus().subscribe(
+            workspace_id, run.id
+        ):
             if await request.is_disconnected():
                 break
             if event is None:
                 # If publication was interrupted after the durable state
                 # changed, do not leave a connected viewer stale forever.
                 latest = await run_in_threadpool(
-                    _load_run_snapshot, request, principal, run.id
+                    _load_run_snapshot, request, principal, workspace_id, run.id
                 )
                 if latest.status in TERMINAL_RUN_STATUSES:
                     yield ProgressEvent.create(
@@ -239,13 +257,19 @@ async def stream_discovery_events(
 def list_run_observations(
     run_id: Annotated[UUID, Path()],
     session: SessionDep,
+    workspace: WorkspaceDep,
     principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> ObservationPageResponse:
     try:
         observations, next_cursor = service.list_run_observations(
-            session, principal, run_id, limit=limit, cursor=cursor
+            session,
+            principal,
+            workspace.id,
+            run_id,
+            limit=limit,
+            cursor=cursor,
         )
     except service.DiscoveryRunNotFound:
         raise _run_not_found() from None

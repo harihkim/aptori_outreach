@@ -172,8 +172,10 @@ class RecordingEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         self.events.append(event)
 
-    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
-        del run_id
+    async def subscribe(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID
+    ) -> AsyncIterator[ProgressEvent | None]:
+        del workspace_id, run_id
         if False:
             yield None
 
@@ -262,10 +264,17 @@ def seed_run(
         engine.dispose()
 
 
-def invoke(run_id: uuid.UUID, qid: str, *, correlation_id: str = "corr-123") -> str:
+def invoke(
+    run_id: uuid.UUID,
+    qid: str,
+    *,
+    workspace_id: uuid.UUID = DEFAULT_WORKSPACE_ID,
+    correlation_id: str = "corr-123",
+) -> str:
     return asyncio.run(
         run_discovery_query(
             None,
+            workspace_id=str(workspace_id),
             run_id=str(run_id),
             correlation_id=correlation_id,
             query_id=qid,
@@ -325,6 +334,18 @@ def row_by_query(rows: list[RetrievalObservation], qid: str) -> RetrievalObserva
     matches = [row for row in rows if row.query_id == qid]
     assert len(matches) == 1, f"expected exactly one row for {qid}, got {len(matches)}"
     return matches[0]
+
+
+def test_worker_cannot_claim_run_from_foreign_workspace(
+    harness: StubHarness, worker_db: str
+) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success"))
+    run_id = seed_run(worker_db, correlation_id="corr-foreign", query_ids=["q-a"])
+    foreign_workspace = uuid.UUID("00000000-0000-0000-0000-000000000002")
+
+    assert invoke(run_id, "q-a", workspace_id=foreign_workspace) == "run_missing"
+    assert load_run(worker_db, run_id).status == "queued"
+    assert load_rows(worker_db, run_id) == []
 
 
 def test_success_and_no_results_complete_the_run(
@@ -497,6 +518,7 @@ def test_worker_publishes_live_progress_after_persisting_observation(
         "discovery.completed",
     ]
     assert all(item.run_id == run_id for item in bus.events)
+    assert all(item.workspace_id == DEFAULT_WORKSPACE_ID for item in bus.events)
     assert all(item.correlation_id == "corr-events" for item in bus.events)
     assert bus.events[1].payload["query_id"] == "q-a"
     assert bus.events[2].payload["status"] == "success"

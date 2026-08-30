@@ -439,6 +439,7 @@ def _roll_up_run(
         session.scalars(
             select(RetrievalObservation)
             .where(
+                RetrievalObservation.workspace_id == run.workspace_id,
                 RetrievalObservation.discovery_run_id == run.id,
                 RetrievalObservation.query_id.in_(planned_ids),
             )
@@ -498,6 +499,7 @@ def _roll_up_run(
 
 def _claim_run(
     manager: DatabaseSessionManager,
+    workspace_id: uuid.UUID,
     run_id: uuid.UUID,
     correlation_id: str,
     query_id: str,
@@ -511,7 +513,12 @@ def _claim_run(
     """
     with manager.session_factory() as session, session.begin():
         run = session.execute(
-            select(DiscoveryRun).where(DiscoveryRun.id == run_id).with_for_update()
+            select(DiscoveryRun)
+            .where(
+                DiscoveryRun.workspace_id == workspace_id,
+                DiscoveryRun.id == run_id,
+            )
+            .with_for_update()
         ).scalar_one_or_none()
         if run is None:
             return "run_missing", None
@@ -541,6 +548,7 @@ def _claim_run(
         # observation already exists must not rerun the attempt.
         already_recorded = session.execute(
             select(RetrievalObservation.id).where(
+                RetrievalObservation.workspace_id == workspace_id,
                 RetrievalObservation.discovery_run_id == run.id,
                 RetrievalObservation.query_id == query_id,
             )
@@ -630,6 +638,7 @@ async def _spawn_attempt(
 
 def _settle_run(
     manager: DatabaseSessionManager,
+    workspace_id: uuid.UUID,
     run_id: uuid.UUID,
     query_id: str,
     correlation_id: str,
@@ -639,7 +648,12 @@ def _settle_run(
     """Phase 3: single final transaction inserts and closes the run."""
     with manager.session_factory() as session, session.begin():
         run = session.execute(
-            select(DiscoveryRun).where(DiscoveryRun.id == run_id).with_for_update()
+            select(DiscoveryRun)
+            .where(
+                DiscoveryRun.workspace_id == workspace_id,
+                DiscoveryRun.id == run_id,
+            )
+            .with_for_update()
         ).scalar_one_or_none()
         if run is None:
             return _Settlement(status="run_missing", recorded=False, completed=False)
@@ -654,6 +668,7 @@ def _settle_run(
         # invocation already recorded this pair.
         already_recorded = session.execute(
             select(RetrievalObservation.id).where(
+                RetrievalObservation.workspace_id == workspace_id,
                 RetrievalObservation.discovery_run_id == run.id,
                 RetrievalObservation.query_id == query_id,
             )
@@ -752,6 +767,7 @@ async def _publish_attempt_progress(
 async def run_discovery_query(
     ctx: object,
     *,
+    workspace_id: str,
     run_id: str,
     correlation_id: str,
     query_id: str,
@@ -769,7 +785,11 @@ async def run_discovery_query(
         connect_timeout_seconds=settings.database_connect_timeout_seconds,
     )
     try:
-        marker, claim = _claim_run(manager, uuid.UUID(run_id), correlation_id, query_id)
+        workspace_uuid = uuid.UUID(workspace_id)
+        run_uuid = uuid.UUID(run_id)
+        marker, claim = _claim_run(
+            manager, workspace_uuid, run_uuid, correlation_id, query_id
+        )
         if marker != "claimed" or claim is None:
             return marker
 
@@ -789,7 +809,8 @@ async def run_discovery_query(
 
         settlement = _settle_run(
             manager,
-            uuid.UUID(run_id),
+            workspace_uuid,
+            run_uuid,
             query_id,
             correlation_id,
             outcome,
