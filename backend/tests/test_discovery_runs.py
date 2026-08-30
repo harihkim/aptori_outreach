@@ -145,9 +145,7 @@ class FakeEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         del event
 
-    async def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         self.subscribed_run_ids.append(run_id)
         for event in self.events:
             yield event
@@ -164,9 +162,7 @@ class SessionObservingEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         del event
 
-    async def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         del run_id
         self.closed_when_subscribed = self.session_state["closed"]
         yield self.event
@@ -296,9 +292,7 @@ def test_run_events_releases_request_session_before_subscribing(
     def forbidden_get_session() -> Iterator[Session]:
         raise AssertionError("SSE must not use the request session dependency")
 
-    monkeypatch.setattr(
-        app.state.database, "session_factory", tracked_session_factory
-    )
+    monkeypatch.setattr(app.state.database, "session_factory", tracked_session_factory)
     monkeypatch.setitem(app.dependency_overrides, get_session, forbidden_get_session)
     completed = ProgressEvent.create(
         event_type="discovery.completed",

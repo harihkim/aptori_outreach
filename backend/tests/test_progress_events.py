@@ -6,7 +6,9 @@ import uuid
 from app.discovery.events import EVENT_TYPES, ProgressEvent
 
 
-def event(run_id: uuid.UUID, event_type: str, payload: dict[str, object]) -> ProgressEvent:
+def event(
+    run_id: uuid.UUID, event_type: str, payload: dict[str, object]
+) -> ProgressEvent:
     return ProgressEvent.create(
         event_type=event_type,
         run_id=run_id,

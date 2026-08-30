@@ -172,9 +172,7 @@ class RecordingEventBus:
     async def publish(self, event: ProgressEvent) -> None:
         self.events.append(event)
 
-    async def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         del run_id
         if False:
             yield None

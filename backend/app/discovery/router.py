@@ -46,6 +46,7 @@ class _DiscoveryRunSnapshot:
     status: str
     metrics: dict[str, object] | None
 
+
 _AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid bearer token."},
     403: {"model": ErrorResponse, "description": "Workspace access denied."},

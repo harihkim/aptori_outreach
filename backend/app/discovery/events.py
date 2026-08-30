@@ -119,9 +119,7 @@ class EventBus(Protocol):
     async def publish(self, event: ProgressEvent) -> None:
         """Publish one event after its domain transaction has committed."""
 
-    def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         """Yield events for a run; ``None`` is a keepalive tick."""
 
 
@@ -141,9 +139,7 @@ class InMemoryEventBus:
         for subscriber in tuple(self._subscribers.get(event.run_id, ())):
             subscriber.put_nowait(event)
 
-    async def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         subscriber: asyncio.Queue[ProgressEvent] = asyncio.Queue()
         self._subscribers.setdefault(run_id, set()).add(subscriber)
         try:
@@ -183,9 +179,7 @@ class RedisEventBus:
         finally:
             await client.aclose()
 
-    async def subscribe(
-        self, run_id: uuid.UUID
-    ) -> AsyncIterator[ProgressEvent | None]:
+    async def subscribe(self, run_id: uuid.UUID) -> AsyncIterator[ProgressEvent | None]:
         from redis.asyncio import from_url
 
         client = from_url(self.redis_url, decode_responses=True)
