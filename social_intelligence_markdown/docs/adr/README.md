@@ -19,6 +19,7 @@ ADRs capture important architectural choices and their consequences. They comple
 | [013](013-subprocess-node-retrieval-seam.md) | Invoke the frozen Node retrieval adapters as a subprocess from Python workers | Accepted |
 | [014](014-provider-agnostic-openai-compatible-llm-config.md) | Configure LLM Tasks against any OpenAI-compatible endpoint | Accepted |
 | [015](015-stratify-provisional-retrieval-smoke.md) | Stratify the provisional retrieval baseline and stress fixtures | Accepted |
+| [016](016-workspace-deployment-and-evidence-boundaries.md) | Establish Workspace and Deployment boundaries with portable evidence bundles | Accepted |
 
 ## ADR lifecycle
 

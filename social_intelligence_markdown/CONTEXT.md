@@ -2,6 +2,20 @@
 
 This context describes the language of the Reddit-first opportunity, drafting, review, and preparation workflow. These terms are stable across the web UI, REST API, MCP adapter, workers, and external providers.
 
+## Boundaries and evidence
+
+**Deployment**:
+One installed instance of the product that can host multiple Workspaces while keeping their data and activity isolated.
+_Avoid_: Environment, Workspace
+
+**Workspace**:
+The smallest isolation boundary for one customer's data, decisions, and activity.
+_Avoid_: Tenant, account
+
+**Evidence Bundle**:
+Immutable raw evidence and its canonical manifest, preserved together as the authoritative record of a retrieval attempt.
+_Avoid_: Snapshot, archive
+
 ## Discovery and intelligence
 
 **Campaign**:
@@ -21,8 +35,12 @@ An immutable record of what one retrieval method observed at a source at a parti
 _Avoid_: Conversation snapshot
 
 **Conversation**:
-The canonical normalized representation of one source discussion across one or more Retrieval Observations.
-_Avoid_: Page, scrape
+The stable Workspace-scoped identity of one source discussion across time and Retrieval Observations; it is not a content hash.
+_Avoid_: Page, scrape, Conversation Version
+
+**Conversation Version**:
+Immutable normalized content for a Conversation, distinguished by its normalized content and the normalizer version that produced it.
+_Avoid_: Conversation snapshot, mutable Conversation
 
 **Opportunity**:
 A Campaign-specific assessment that a Conversation may merit monitoring, a helpful response, or original content work.
