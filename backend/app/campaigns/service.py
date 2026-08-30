@@ -86,6 +86,7 @@ def _stage_create_campaign(
         action="campaign.created",
         target_type="campaign",
         target_id=campaign.id,
+        workspace_id=workspace_id,
         after={"status": campaign.status},
     )
     return campaign
@@ -147,6 +148,7 @@ def list_campaign_audit(
 ) -> tuple[list[AuditEvent], str | None]:
     get_campaign(session, principal, workspace_id, campaign_id)
     statement = select(AuditEvent).where(
+        AuditEvent.workspace_id == workspace_id,
         AuditEvent.target_type == "campaign",
         AuditEvent.target_id == campaign_id,
     )
@@ -256,6 +258,7 @@ def _stage_update_campaign(
             action="campaign.updated",
             target_type="campaign",
             target_id=campaign.id,
+            workspace_id=workspace_id,
             after={"fields": sorted(updates)},
         )
 
@@ -270,6 +273,7 @@ def _stage_update_campaign(
             action="campaign.transitioned",
             target_type="campaign",
             target_id=campaign.id,
+            workspace_id=workspace_id,
             before={"status": before},
             after={"status": requested_status},
         )

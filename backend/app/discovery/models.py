@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -87,6 +88,14 @@ class DiscoveryRun(Base):
             _in_values("status", DISCOVERY_RUN_STATUSES),
             name="status_values",
         ),
+        UniqueConstraint(
+            "workspace_id", "id", name="uq_discovery_runs_workspace_id_id"
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "campaign_id"],
+            ["campaigns.workspace_id", "campaigns.id"],
+            name="fk_discovery_runs_workspace_id_campaign_id_campaigns",
+        ),
         Index(
             "ix_discovery_runs_campaign_creation_order", "campaign_id", "creation_order"
         ),
@@ -99,7 +108,7 @@ class DiscoveryRun(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), index=True
     )
-    campaign_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("campaigns.id"))
+    campaign_id: Mapped[uuid.UUID] = mapped_column()
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="queued", server_default="queued"
     )
@@ -128,6 +137,16 @@ class RetrievalObservation(Base):
         UniqueConstraint(
             "discovery_run_id", "query_id", name="uq_retrieval_observations_run_query"
         ),
+        UniqueConstraint(
+            "workspace_id", "id", name="uq_retrieval_observations_workspace_id_id"
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "discovery_run_id"],
+            ["discovery_runs.workspace_id", "discovery_runs.id"],
+            name=(
+                "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs"
+            ),
+        ),
         CheckConstraint(
             _in_values("capability", OBSERVATION_CAPABILITIES),
             name="capability_values",
@@ -147,7 +166,7 @@ class RetrievalObservation(Base):
     creation_order: Mapped[int] = mapped_column(
         BigInteger, Identity(always=True), unique=True
     )
-    discovery_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("discovery_runs.id"))
+    discovery_run_id: Mapped[uuid.UUID] = mapped_column()
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), index=True
     )

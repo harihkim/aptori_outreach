@@ -91,6 +91,7 @@ async def reap_stale_running_runs(ctx: object) -> int:
                     action="discovery_run.reaped",
                     target_type="discovery_run",
                     target_id=run.id,
+                    workspace_id=run.workspace_id,
                     before={"status": previous_status},
                     after={"status": "failed"},
                     correlation_id=run.correlation_id,

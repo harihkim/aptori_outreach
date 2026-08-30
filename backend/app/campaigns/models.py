@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -36,6 +37,7 @@ class Campaign(Base):
         CheckConstraint(
             _in_values("promotion_posture", CAMPAIGN_POSTURES), name="posture_values"
         ),
+        UniqueConstraint("workspace_id", "id", name="uq_campaigns_workspace_id_id"),
         Index(
             "ix_campaigns_workspace_creation_order", "workspace_id", "creation_order"
         ),

@@ -553,6 +553,38 @@ def test_campaign_audit_is_authorized_and_cursor_paginated(client: TestClient) -
     assert all(event["actor"] == "operator" for event in newest.json()["items"])
 
 
+def test_campaign_audit_filters_events_by_workspace(
+    client: TestClient, migrated_test_database: str
+) -> None:
+    created = created_campaign(client)
+    foreign_workspace = uuid.uuid4()
+    with create_engine(migrated_test_database).begin() as connection:
+        connection.execute(
+            text("INSERT INTO workspaces (id, name) VALUES (:id, :name)"),
+            {"id": str(foreign_workspace), "name": f"audit-{foreign_workspace}"},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO audit_events "
+                "(id, workspace_id, actor, action, target_type, target_id) "
+                "VALUES (:id, :workspace, 'foreign', 'foreign.audit', 'campaign', "
+                ":target)"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "workspace": str(foreign_workspace),
+                "target": created["id"],
+            },
+        )
+
+    response = client.get(f"/campaigns/{created['id']}/audit")
+
+    assert response.status_code == 200
+    assert [event["action"] for event in response.json()["items"]] == [
+        "campaign.created"
+    ]
+
+
 def test_campaign_audit_hides_unknown_campaigns_and_rejects_wrong_cursor(
     client: TestClient,
 ) -> None:

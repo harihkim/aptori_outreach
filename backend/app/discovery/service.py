@@ -189,6 +189,7 @@ def start_discovery_run(
             action="discovery_run.created",
             target_type="discovery_run",
             target_id=run.id,
+            workspace_id=campaign.workspace_id,
             after={"status": run.status},
             correlation_id=run.correlation_id,
         )
