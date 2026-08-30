@@ -143,9 +143,7 @@ class RetrievalObservation(Base):
         ForeignKeyConstraint(
             ["workspace_id", "discovery_run_id"],
             ["discovery_runs.workspace_id", "discovery_runs.id"],
-            name=(
-                "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs"
-            ),
+            name=("fk_retrieval_observations_workspace_run_discovery_runs"),
         ),
         CheckConstraint(
             _in_values("capability", OBSERVATION_CAPABILITIES),

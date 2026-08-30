@@ -372,7 +372,7 @@ def test_workspace_ownership_schema_and_idempotency_parity(
             ),
             (
                 "retrieval_observations",
-                "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs",
+                "fk_retrieval_observations_workspace_run_discovery_runs",
                 ["workspace_id", "discovery_run_id"],
                 ["workspace_id", "id"],
             ),

@@ -156,7 +156,7 @@ def upgrade() -> None:
         type_="foreignkey",
     )
     op.create_foreign_key(
-        "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs",
+        "fk_retrieval_observations_workspace_run_discovery_runs",
         "retrieval_observations",
         "discovery_runs",
         ["workspace_id", "discovery_run_id"],
@@ -215,7 +215,7 @@ def downgrade() -> None:
     op.drop_column("audit_events", "workspace_id")
 
     op.drop_constraint(
-        "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs",
+        "fk_retrieval_observations_workspace_run_discovery_runs",
         "retrieval_observations",
         type_="foreignkey",
     )

@@ -73,7 +73,7 @@ def test_child_rows_use_workspace_scoped_foreign_keys() -> None:
 
     observation_fk = _foreign_key_constraint(
         RetrievalObservation,
-        "fk_retrieval_observations_workspace_id_discovery_run_id_discovery_runs",
+        "fk_retrieval_observations_workspace_run_discovery_runs",
     )
     assert tuple(observation_fk.columns.keys()) == (
         "workspace_id",
