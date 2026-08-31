@@ -32,6 +32,10 @@ def clean_campaign_rows(migrated_test_database: str) -> Iterator[None]:
     with create_engine(migrated_test_database).begin() as connection:
         connection.execute(text("DELETE FROM audit_events"))
         connection.execute(text("DELETE FROM idempotency_events"))
+        # Migration tests may leave non-immutable runs behind while their
+        # append-only observations are purged. Remove those children before
+        # deleting campaigns so this fixture remains order-independent.
+        connection.execute(text("DELETE FROM discovery_runs"))
         connection.execute(text("DELETE FROM campaigns"))
 
 
