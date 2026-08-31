@@ -33,8 +33,14 @@ from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.discovery.observations import STATUS_VALUES
-from app.discovery.runner import _parse_iso, run_discovery_query
+from app.discovery.runner import (
+    _evidence_failure_reason,
+    _parse_iso,
+    run_discovery_query,
+)
 from app.discovery.worker import reap_stale_running_runs
+from app.evidence.models import EvidenceBundle
+from app.evidence.store import EvidenceStoreError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import admin_database_url, configured_database_url
 
@@ -104,6 +110,7 @@ def write_raw_stub(tmp_path: Path, tail: str) -> Path:
 
 DOCS_SERVING_TAIL = (
     'DOC="$DOCS/$ID.json"\n'
+    "printf 'raw evidence\\n' > \"$ATTEMPT_DIR/raw-page.html\"\n"
     'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
     '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
     'cat "$ATTEMPT_DIR/observation.json"\n'
@@ -128,6 +135,7 @@ class StubHarness:
         self.docs_dir = tmp_path / "docs"
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.evidence_root = tmp_path / "evidence-runs"
+        self.staging_root = tmp_path / "retrieval-staging"
         self.input_root = tmp_path / "input-scratch"
         self.cli_path = tmp_path / "retrieval-cli.js"
         self.config_path = tmp_path / "provider-config.json"
@@ -158,6 +166,7 @@ class StubHarness:
         mp.setenv("APTORI_RETRIEVAL_CLI_PATH", str(self.cli_path))
         mp.setenv("APTORI_DISCOVERY_PROVIDER_CONFIG_PATH", str(self.config_path))
         mp.setenv("APTORI_RETRIEVAL_EVIDENCE_ROOT", str(self.evidence_root))
+        mp.setenv("APTORI_RETRIEVAL_STAGING_ROOT", str(self.staging_root))
         mp.setenv("APTORI_RETRIEVAL_INPUT_SCRATCH_ROOT", str(self.input_root))
         mp.setenv("APTORI_RETRIEVAL_ATTEMPT_TIMEOUT_SECONDS", str(self.timeout_seconds))
         get_settings.cache_clear()
@@ -216,6 +225,12 @@ def fixture_doc(
         "network": {"requests": {"q-a": 14, "q-b": 7}.get(qid, 5)},
         "runtime": {"node": "20.18.0"},
         "evidenceDirectory": "@@EVIDENCE@@/attempt-@@QID@@",
+        "rawArtifact": {
+            "path": "@@EVIDENCE@@/attempt-@@QID@@/raw-page.html",
+            "filename": "raw-page.html",
+            "bytes": 0,
+            "sha256": "0" * 64,
+        },
     }
     doc.update(overrides)
     return doc
@@ -312,6 +327,31 @@ def load_rows(database_url: str, run_id: uuid.UUID) -> list[RetrievalObservation
         engine.dispose()
 
 
+def load_bundles(database_url: str, bundle_ids: set[uuid.UUID]) -> list[EvidenceBundle]:
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            bundles = list(
+                session.scalars(
+                    select(EvidenceBundle).where(EvidenceBundle.id.in_(bundle_ids))
+                )
+            )
+            for bundle in bundles:
+                session.expunge(bundle)
+            return bundles
+    finally:
+        engine.dispose()
+
+
+def bundle_count(database_url: str) -> int:
+    engine = create_engine(database_url)
+    try:
+        with Session(engine) as session:
+            return len(list(session.scalars(select(EvidenceBundle.id))))
+    finally:
+        engine.dispose()
+
+
 def load_audit(database_url: str, run_id: uuid.UUID) -> list[AuditEvent]:
     engine = create_engine(database_url)
     try:
@@ -388,8 +428,20 @@ def test_success_and_no_results_complete_the_run(
     assert success_row.failure_class is None
     assert success_row.candidate_count == 3
     assert success_row.observation_id == "attempt-q-a"
-    assert success_row.evidence_directory is not None
-    assert success_row.evidence_directory.endswith("attempt-q-a")
+    assert success_row.evidence_state == "bundle"
+    assert success_row.evidence_bundle_id is not None
+    assert success_row.evidence_directory is None
+    assert success_row.raw_artifact is not None
+    assert "path" not in success_row.raw_artifact
+    assert no_results_row.evidence_state == "bundle"
+    assert no_results_row.evidence_bundle_id == success_row.evidence_bundle_id
+    assert success_row.evidence_bundle_id is not None
+    bundles = load_bundles(worker_db, {success_row.evidence_bundle_id})
+    assert len(bundles) == 1
+    manifest = bundles[0].artifact_manifest
+    assert set(manifest) == {"manifest_version", "artifacts"}
+    assert manifest["manifest_version"] == "evidence-bundle/v1"
+    assert manifest["artifacts"] == [success_row.raw_artifact]
     assert success_row.network == {"requests": 14}
     assert no_results_row.status == "no_results"
     assert no_results_row.failure_class is None
@@ -401,6 +453,7 @@ def test_success_and_no_results_complete_the_run(
     assert list(staged_input.parent.glob("input-q-b.json"))
     leaked_inputs = [path.name for path in harness.evidence_root.rglob("input-*.json")]
     assert leaked_inputs == []
+    assert not harness.staging_root.exists()
 
 
 def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -> None:
@@ -454,7 +507,9 @@ def test_unknown_schema_version_persists_unclassified_failure(
     assert bad_row.status == "failed"
     assert bad_row.failure_class == "unknown_observation_schema"
     assert bad_row.observation_id == f"{run_id}:q-bad:unclassified"
-    assert bad_row.evidence_directory == str(harness.evidence_root / str(run_id))
+    assert bad_row.evidence_state == "none"
+    assert bad_row.evidence_bundle_id is None
+    assert bad_row.evidence_directory is None
 
 
 def test_replay_same_query_does_not_duplicate_observation(
@@ -470,6 +525,9 @@ def test_replay_same_query_does_not_duplicate_observation(
     assert first_status == "succeeded"
     assert second_status == "already_done"
     assert len(load_rows(worker_db, run_id)) == 1
+    first_row = load_rows(worker_db, run_id)[0]
+    assert first_row.evidence_bundle_id is not None
+    assert len(load_bundles(worker_db, {first_row.evidence_bundle_id})) == 1
     started_events = [
         event
         for event in load_audit(worker_db, run_id)
@@ -550,6 +608,7 @@ def test_timeout_with_written_evidence_recovers_completed_observation(
     harness = StubHarness(monkeypatch, tmp_path, timeout_seconds=5)
     harness.use_tail(
         'DOC="$DOCS/$ID.json"\n'
+        "printf 'raw evidence\\n' > \"$ATTEMPT_DIR/raw-page.html\"\n"
         'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
         '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
         "sleep 30\n"
@@ -950,6 +1009,7 @@ def test_exit_zero_without_any_evidence_is_unlocated_not_transport(
     """Exit 0 without disk evidence or a pointer is an honesty gap."""
     harness.use_tail('printf "not json at all"\nexit 0\n')
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+    before_bundle_count = bundle_count(worker_db)
 
     final_status = invoke(run_id, "q-x")
 
@@ -957,6 +1017,10 @@ def test_exit_zero_without_any_evidence_is_unlocated_not_transport(
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
     assert row.status == "failed"
     assert row.failure_class == "evidence_unlocated"
+    assert row.evidence_state == "none"
+    assert row.evidence_bundle_id is None
+    assert row.evidence_directory is None
+    assert bundle_count(worker_db) == before_bundle_count
     assert "observation.json" in (row.failure_reason or "")
 
 
@@ -972,6 +1036,13 @@ def test_genuine_transport_failure_stays_transport_error(
     row = row_by_query(load_rows(worker_db, run_id), "q-x")
     assert row.status == "failed"
     assert row.failure_class == "transport_error"
+
+
+def test_storage_failure_reason_does_not_include_exception_paths() -> None:
+    error = EvidenceStoreError("/tmp/staging/run-123/raw-page.html")
+    reason = _evidence_failure_reason(error)
+    assert reason == "raw evidence could not be finalized (EvidenceStoreError)"
+    assert "/tmp/staging" not in reason
 
 
 def test_classification_outputs_stay_within_failure_class_vocabulary() -> None:

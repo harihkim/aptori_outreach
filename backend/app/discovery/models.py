@@ -214,9 +214,7 @@ class RetrievalObservation(Base):
     runtime: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     network: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     raw_artifact: Mapped[dict[str, object] | None] = mapped_column(JSONB)
-    evidence_state: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="legacy", server_default="legacy"
-    )
+    evidence_state: Mapped[str] = mapped_column(String(16), nullable=False)
     evidence_bundle_id: Mapped[uuid.UUID | None] = mapped_column()
     evidence_directory: Mapped[str | None] = mapped_column(Text)
     correlation_id: Mapped[str] = mapped_column(String(128))

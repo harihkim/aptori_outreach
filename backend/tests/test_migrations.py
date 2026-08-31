@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0012_evidence_bundles"
+HEAD_REVISION = "0013_require_evidence_state"
 
 
 def _alembic_config(database_url: str) -> Config:

@@ -8,9 +8,9 @@ never leave a database transaction open across a subprocess spawn:
    rows, moves queued->running with its audit event, replays-guards the
    observation pair, and commits.
 2. SPAWN — the retrieval CLI runs with NO open transaction or connection.
-   Query inputs are staged in the Python-owned scratch root (the evidence
-   output root belongs to the CLI); classification happens here too: every
-   outcome becomes an attempt outcome, never an exception.
+   Query inputs are staged in the Python-owned scratch root and CLI output is
+   written to a separate expendable staging root; classification happens here
+   too: every outcome becomes an attempt outcome, never an exception.
 3. SETTLE — one final transaction re-locks the run, authoritatively
    replay-guards the insert, rolls the run up counting only planned queries,
    and transitions it to a terminal status exactly once.
@@ -21,6 +21,9 @@ binaries or paths.
 """
 
 import json
+import mimetypes
+import re
+import shutil
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -30,6 +33,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auditing.service import record_audit
@@ -54,6 +58,16 @@ from app.discovery.observations import (
     redact_sensitive_text,
 )
 from app.discovery.service import QUERY_ID_PATTERN
+from app.evidence.models import EvidenceBundle
+from app.evidence.store import (
+    ArtifactInput,
+    ArtifactValidationError,
+    EvidenceStore,
+    EvidenceStoreError,
+    EvidenceStoreLimits,
+    FinalizedBundle,
+    LocalEvidenceStore,
+)
 
 # Ruling sets for the run roll-up. Succeeded means nothing was lost;
 # usable includes incomplete because partial evidence still has value.
@@ -86,7 +100,8 @@ class _AttemptConfig:
     node_bin: str
     cli_path: str
     config_path: str
-    evidence_root: Path
+    staging_root: Path
+    evidence_store: EvidenceStore
     input_root: Path
     timeout_seconds: float
 
@@ -119,17 +134,31 @@ class _AttemptOutcome:
 
     evidence_directory: str
     doc: ObservationDocument | None = None
+    bundle: FinalizedBundle | None = None
+    raw_artifact: dict[str, object] | None = None
     failure_class: str | None = None
     failure_reason: str | None = None
 
 
 def _resolve_config() -> _AttemptConfig:
     settings = get_settings()
+    limits = EvidenceStoreLimits(
+        max_artifacts=settings.evidence_store_max_artifacts,
+        max_artifact_bytes=settings.evidence_store_max_artifact_bytes,
+        max_total_bytes=settings.evidence_store_max_total_bytes,
+        max_manifest_bytes=settings.evidence_store_max_manifest_bytes,
+        max_name_bytes=settings.evidence_store_max_name_bytes,
+        max_role_bytes=settings.evidence_store_max_role_bytes,
+        max_media_type_bytes=settings.evidence_store_max_media_type_bytes,
+    )
     return _AttemptConfig(
         node_bin=settings.retrieval_node_bin,
         cli_path=str(settings.retrieval_cli_path),
         config_path=str(settings.discovery_provider_config_path),
-        evidence_root=Path(settings.retrieval_evidence_root),
+        staging_root=Path(settings.retrieval_staging_root),
+        evidence_store=LocalEvidenceStore(
+            Path(settings.retrieval_evidence_root), limits
+        ),
         input_root=Path(settings.retrieval_input_scratch_root),
         timeout_seconds=float(settings.retrieval_attempt_timeout_seconds),
     )
@@ -173,7 +202,9 @@ def _new_observation(
     config_sha256: str,
     observation_id: str,
     status: str,
-    evidence_directory: str,
+    evidence_state: str,
+    evidence_bundle_id: uuid.UUID | None = None,
+    evidence_directory: str | None = None,
     failure_class: str | None = None,
     failure_reason: str | None = None,
     source_url: str | None = None,
@@ -216,13 +247,20 @@ def _new_observation(
         runtime=runtime,
         network=network,
         raw_artifact=raw_artifact,
+        evidence_state=evidence_state,
+        evidence_bundle_id=evidence_bundle_id,
         evidence_directory=evidence_directory,
         correlation_id=correlation_id,
     )
 
 
 def _document_observation(
-    run: DiscoveryRun, query_id: str, correlation_id: str, doc: ObservationDocument
+    run: DiscoveryRun,
+    query_id: str,
+    correlation_id: str,
+    doc: ObservationDocument,
+    bundle: FinalizedBundle,
+    raw_artifact: dict[str, object],
 ) -> RetrievalObservation:
     """Map a validated observation document onto an append-only row."""
     return _new_observation(
@@ -234,7 +272,8 @@ def _document_observation(
         config_sha256=doc.config_sha256,
         observation_id=doc.observation_id,
         status=doc.status,
-        evidence_directory=doc.evidence_directory,
+        evidence_state="bundle",
+        evidence_bundle_id=bundle.id,
         failure_reason=doc.failure_reason,
         source_url=doc.source_url,
         final_url=doc.final_url,
@@ -246,7 +285,39 @@ def _document_observation(
         completed_at=_parse_iso(doc.completed_at),
         runtime=doc.runtime,
         network=doc.network,
-        raw_artifact=doc.raw_artifact,
+        raw_artifact=raw_artifact,
+    )
+
+
+def _failed_document_observation(
+    run: DiscoveryRun,
+    query_id: str,
+    correlation_id: str,
+    doc: ObservationDocument,
+    *,
+    failure_class: str,
+    failure_reason: str,
+) -> RetrievalObservation:
+    """Retain safe provider context while recording no trustworthy evidence."""
+    return _new_observation(
+        run,
+        query_id,
+        correlation_id,
+        schema_version=doc.schema_version,
+        provider_variant=doc.provider_variant,
+        config_sha256=doc.config_sha256,
+        observation_id=doc.observation_id,
+        status="failed",
+        evidence_state="none",
+        failure_class=failure_class,
+        failure_reason=failure_reason,
+        source_url=doc.source_url,
+        final_url=doc.final_url,
+        elapsed_ms=doc.elapsed_ms,
+        started_at=_parse_iso(doc.started_at),
+        completed_at=_parse_iso(doc.completed_at),
+        runtime=doc.runtime,
+        network=doc.network,
     )
 
 
@@ -270,7 +341,7 @@ def _unclassified_observation(
         config_sha256=str(plan.get("config_sha256") or "0" * 64),
         observation_id=f"{run.id}:{query_id}:unclassified",
         status="failed",
-        evidence_directory=str(output_root),
+        evidence_state="none",
         failure_class=failure_class,
         failure_reason=failure_reason,
     )
@@ -293,13 +364,31 @@ def _outcome_to_row(
             f"classifier produced out-of-vocabulary failure_class "
             f"{outcome.failure_class!r}"
         )
-    if outcome.doc is not None:
-        return _document_observation(run, query_id, correlation_id, outcome.doc)
+    if outcome.doc is not None and outcome.bundle is not None:
+        if outcome.raw_artifact is None:
+            raise ValueError("bundled outcome is missing raw artifact metadata")
+        return _document_observation(
+            run,
+            query_id,
+            correlation_id,
+            outcome.doc,
+            outcome.bundle,
+            outcome.raw_artifact,
+        )
+    if outcome.doc is not None and outcome.failure_class is not None:
+        return _failed_document_observation(
+            run,
+            query_id,
+            correlation_id,
+            outcome.doc,
+            failure_class=outcome.failure_class,
+            failure_reason=outcome.failure_reason or "raw evidence is unavailable",
+        )
     return _unclassified_observation(
         run,
         query_id,
         correlation_id,
-        Path(outcome.evidence_directory) if outcome.evidence_directory else output_root,
+        output_root,
         failure_class=outcome.failure_class or "transport_error",
         failure_reason=outcome.failure_reason or "unclassified retrieval failure",
     )
@@ -407,6 +496,122 @@ def _classify_result(
             f"(stderr tail: {result.stderr_tail[-500:]!r})"
         ),
     )
+
+
+def _raw_artifact_input(doc: ObservationDocument, staging_root: Path) -> ArtifactInput:
+    """Validate the provider-declared raw file without trusting its metadata."""
+    raw = doc.raw_artifact
+    if not isinstance(raw, dict):
+        raise ArtifactValidationError("observation has no declared raw artifact")
+    path_value = raw.get("path")
+    filename = raw.get("filename")
+    declared_bytes = raw.get("bytes")
+    declared_digest = raw.get("sha256")
+    if not isinstance(path_value, str) or not path_value:
+        raise ArtifactValidationError("raw artifact path is missing")
+    if not isinstance(filename, str) or not filename:
+        raise ArtifactValidationError("raw artifact filename is missing")
+    if not isinstance(declared_bytes, int) or isinstance(declared_bytes, bool):
+        raise ArtifactValidationError("raw artifact bytes is invalid")
+    if declared_bytes < 0:
+        raise ArtifactValidationError("raw artifact bytes is negative")
+    if (
+        not isinstance(declared_digest, str)
+        or len(declared_digest) != 64
+        or any(character not in "0123456789abcdef" for character in declared_digest)
+    ):
+        raise ArtifactValidationError("raw artifact sha256 is invalid")
+    if "\x00" in path_value or "\x00" in filename:
+        raise ArtifactValidationError("raw artifact contains NUL")
+
+    # Node emits absolute paths. Requiring one here avoids interpreting a
+    # provider-controlled relative path against a changing process cwd.
+    declared_path = Path(path_value)
+    if not declared_path.is_absolute() or Path(filename).name != filename:
+        raise ArtifactValidationError("raw artifact path or filename is invalid")
+    try:
+        staging_resolved = staging_root.resolve(strict=True)
+        attempt_resolved = Path(doc.evidence_directory).resolve(strict=True)
+        attempt_resolved.relative_to(staging_resolved)
+        if attempt_resolved == staging_resolved:
+            raise ArtifactValidationError("evidence directory is not an attempt")
+        source_stat = declared_path.lstat()
+        if source_stat.st_mode & 0o170000 != 0o100000:
+            raise ArtifactValidationError("raw artifact is not a regular file")
+        source_resolved = declared_path.resolve(strict=True)
+        source_resolved.relative_to(attempt_resolved)
+    except (OSError, ValueError) as error:
+        raise ArtifactValidationError(
+            "raw artifact is outside the declared staging attempt"
+        ) from error
+
+    media_type = mimetypes.guess_type(filename, strict=False)[0]
+    return ArtifactInput(
+        name=filename,
+        role="raw",
+        media_type=media_type or "application/octet-stream",
+        path=declared_path,
+    )
+
+
+def _raw_artifact_metadata(bundle: FinalizedBundle) -> dict[str, object]:
+    """Return only canonical, path-free metadata produced by EvidenceStore."""
+    artifacts = bundle.artifact_manifest.get("artifacts")
+    if not isinstance(artifacts, list) or len(artifacts) != 1:
+        raise EvidenceStoreError("discovery bundle must contain one raw artifact")
+    descriptor = artifacts[0]
+    if not isinstance(descriptor, dict):
+        raise EvidenceStoreError("discovery bundle descriptor is invalid")
+    return dict(descriptor)
+
+
+def _evidence_failure_reason(error: BaseException) -> str:
+    """Render storage failures without copying provider-controlled paths."""
+    error_code = type(error).__name__
+    return f"raw evidence could not be finalized ({error_code})"
+
+
+def _cleanup_staging_attempt(
+    staging_root: Path, output_root: Path, query_id: str
+) -> None:
+    """Remove only this query's attempt, without following links or crossing roots."""
+    try:
+        root = staging_root.resolve(strict=True)
+        output = output_root.resolve(strict=True)
+        output.relative_to(root)
+    except (OSError, ValueError):
+        return
+    safe_query = re.sub(r"[^a-zA-Z0-9_-]+", "-", query_id).strip("-")[:80] or "attempt"
+    prefixes = (f"{safe_query}_", f"attempt-{query_id}")
+    try:
+        candidates = [
+            path
+            for path in output.rglob("*")
+            if path.is_dir() and path.name.startswith(prefixes)
+        ]
+    except OSError:
+        return
+
+    def path_depth(path: Path) -> int:
+        return len(path.parts)
+
+    for candidate in sorted(candidates, key=path_depth, reverse=True):
+        try:
+            candidate.resolve(strict=True).relative_to(root)
+            if candidate.is_symlink():
+                candidate.unlink()
+            else:
+                shutil.rmtree(candidate)
+        except (OSError, ValueError):
+            continue
+    # Prune empty run/capability parents, stopping at the configured root.
+    current = output
+    while current != root:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
 
 
 def _network_request_count(row: RetrievalObservation) -> int | None:
@@ -581,7 +786,7 @@ def _claim_run(
             )
 
         if violation_reason is not None:
-            output_root = get_settings().retrieval_evidence_root / str(run_id)
+            output_root = get_settings().retrieval_staging_root / str(run_id)
             session.add(
                 _unclassified_observation(
                     run,
@@ -614,26 +819,116 @@ async def _spawn_attempt(
 ) -> _AttemptOutcome:
     """Phase 2: spawn the CLI — no DB tx is open, kwargs are already vetted.
 
-    The query input document is staged in the Python-owned scratch root; the
-    evidence output root is owned by the CLI and only ever read back.
+    The query input document is staged in the Python-owned scratch root; CLI
+    output is written to a separate expendable staging root and only read back.
     """
     input_dir = config.input_root / str(claim.run_id)
     input_dir.mkdir(parents=True, exist_ok=True)
     input_path = input_dir / f"input-{query_id}.json"
     input_path.write_text(json.dumps({"queries": [claim.entry]}))
 
-    output_root = config.evidence_root / str(claim.run_id)
-    result = await cli.run_retrieval_cli(
-        "discover",
-        node_bin=config.node_bin,
-        cli_path=config.cli_path,
-        config_path=config.config_path,
-        input_path=str(input_path),
-        query_id=query_id,
-        output_root=str(output_root),
-        timeout_seconds=config.timeout_seconds,
+    # The CLI owns this tree only for the duration of one attempt. It never
+    # writes directly into the durable EvidenceStore root.
+    config.staging_root.mkdir(parents=True, exist_ok=True)
+    output_root = config.staging_root / str(claim.run_id)
+    try:
+        result = await cli.run_retrieval_cli(
+            "discover",
+            node_bin=config.node_bin,
+            cli_path=config.cli_path,
+            config_path=config.config_path,
+            input_path=str(input_path),
+            query_id=query_id,
+            output_root=str(output_root),
+            timeout_seconds=config.timeout_seconds,
+        )
+        outcome = _classify_result(result, output_root, config.timeout_seconds)
+        if outcome.doc is not None:
+            try:
+                artifact = _raw_artifact_input(outcome.doc, config.staging_root)
+                bundle = config.evidence_store.finalize_bundle(
+                    claim.workspace_id, [artifact]
+                )
+                if not config.evidence_store.verify_bundle(bundle):
+                    raise EvidenceStoreError(
+                        "finalized raw evidence failed verification"
+                    )
+                outcome = _AttemptOutcome(
+                    evidence_directory=outcome.evidence_directory,
+                    doc=outcome.doc,
+                    bundle=bundle,
+                    raw_artifact=_raw_artifact_metadata(bundle),
+                )
+            except (
+                ArtifactValidationError,
+                EvidenceStoreError,
+                OSError,
+                ValueError,
+            ) as error:
+                outcome = _AttemptOutcome(
+                    evidence_directory=outcome.evidence_directory,
+                    doc=outcome.doc,
+                    failure_class="evidence_unreadable",
+                    failure_reason=_evidence_failure_reason(error),
+                )
+        return outcome
+    finally:
+        _cleanup_staging_attempt(config.staging_root, output_root, query_id)
+
+
+def _ensure_bundle_row(session: Session, bundle: FinalizedBundle) -> uuid.UUID:
+    """Reuse an orphaned bundle or insert its immutable manifest once."""
+    existing = session.scalar(
+        select(EvidenceBundle).where(
+            EvidenceBundle.workspace_id == bundle.workspace_id,
+            EvidenceBundle.bundle_sha256 == bundle.bundle_sha256,
+        )
     )
-    return _classify_result(result, output_root, config.timeout_seconds)
+    if existing is not None:
+        if (
+            existing.id != bundle.id
+            or existing.storage_key != bundle.storage_key
+            or existing.manifest_version != bundle.manifest_version
+            or existing.artifact_manifest != bundle.artifact_manifest
+        ):
+            raise EvidenceStoreError("database bundle identity conflicts with store")
+        return existing.id
+
+    row = EvidenceBundle(
+        id=bundle.id,
+        workspace_id=bundle.workspace_id,
+        manifest_version=bundle.manifest_version,
+        bundle_sha256=bundle.bundle_sha256,
+        storage_key=bundle.storage_key,
+        artifact_manifest=bundle.artifact_manifest,
+    )
+    try:
+        # A concurrent attempt may publish the same content-addressed bundle
+        # between the lookup and INSERT. Isolate the conflict so the outer
+        # observation transaction remains usable and can reuse that row.
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+    except IntegrityError as error:
+        existing = session.scalar(
+            select(EvidenceBundle).where(
+                EvidenceBundle.workspace_id == bundle.workspace_id,
+                EvidenceBundle.bundle_sha256 == bundle.bundle_sha256,
+            )
+        )
+        if existing is None:
+            raise
+        if (
+            existing.id != bundle.id
+            or existing.storage_key != bundle.storage_key
+            or existing.manifest_version != bundle.manifest_version
+            or existing.artifact_manifest != bundle.artifact_manifest
+        ):
+            raise EvidenceStoreError(
+                "database bundle identity conflicts with store"
+            ) from error
+        return existing.id
+    return row.id
 
 
 def _settle_run(
@@ -676,6 +971,8 @@ def _settle_run(
         if already_recorded is not None:
             return _Settlement(status=run.status, recorded=False, completed=False)
 
+        if outcome.bundle is not None:
+            _ensure_bundle_row(session, outcome.bundle)
         observation = _outcome_to_row(
             run, query_id, correlation_id, Path(outcome.evidence_directory), outcome
         )

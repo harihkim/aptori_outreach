@@ -210,6 +210,7 @@ def insert_observation(engine_url: str, run_id: str, qid: str, status: str) -> N
                     config_sha256="0" * 64,
                     observation_id=f"attempt-{qid}",
                     status=status,
+                    evidence_state="legacy",
                     evidence_directory=f"/evidence-runs/{run_id}/attempt-{qid}",
                     correlation_id="corr-api-test",
                 )
