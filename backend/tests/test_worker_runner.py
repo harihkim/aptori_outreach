@@ -1038,6 +1038,32 @@ def test_genuine_transport_failure_stays_transport_error(
     assert row.failure_class == "transport_error"
 
 
+def test_cross_run_evidence_pointer_is_rejected_without_a_bundle(
+    harness: StubHarness, worker_db: str
+) -> None:
+    """A valid document may not ingest an artifact from another run."""
+    harness.write_doc("q-x", fixture_doc("q-x", "success"))
+    harness.use_tail(
+        'SIBLING="$OUT/../sibling-run/attempt-q-x"\n'
+        'mkdir -p "$SIBLING"\n'
+        'printf "raw evidence\\n" > "$SIBLING/raw-page.html"\n'
+        'sed -e "s|@@EVIDENCE@@|$OUT/../sibling-run|g" '
+        '-e "s|@@QID@@|$ID|g" "$DOCS/$ID.json" > '
+        '"$SIBLING/observation.json"\n'
+        'printf "{\\"evidenceDirectory\\":\\"%s\\"}" "$SIBLING"\n'
+        "exit 0\n"
+    )
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-x"])
+
+    assert invoke(run_id, "q-x") == "failed"
+    row = row_by_query(load_rows(worker_db, run_id), "q-x")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unreadable"
+    assert row.evidence_state == "none"
+    assert row.evidence_bundle_id is None
+    assert row.evidence_directory is None
+
+
 def test_storage_failure_reason_does_not_include_exception_paths() -> None:
     error = EvidenceStoreError("/tmp/staging/run-123/raw-page.html")
     reason = _evidence_failure_reason(error)

@@ -498,7 +498,12 @@ def _classify_result(
     )
 
 
-def _raw_artifact_input(doc: ObservationDocument, staging_root: Path) -> ArtifactInput:
+def _raw_artifact_input(
+    doc: ObservationDocument,
+    staging_root: Path,
+    output_root: Path,
+    query_id: str,
+) -> ArtifactInput:
     """Validate the provider-declared raw file without trusting its metadata."""
     raw = doc.raw_artifact
     if not isinstance(raw, dict):
@@ -531,9 +536,21 @@ def _raw_artifact_input(doc: ObservationDocument, staging_root: Path) -> Artifac
         raise ArtifactValidationError("raw artifact path or filename is invalid")
     try:
         staging_resolved = staging_root.resolve(strict=True)
+        output_resolved = output_root.resolve(strict=True)
         attempt_resolved = Path(doc.evidence_directory).resolve(strict=True)
         attempt_resolved.relative_to(staging_resolved)
-        if attempt_resolved == staging_resolved:
+        # The evidence pointer must identify this invocation's run output,
+        # not another run or a sibling query attempt below the global staging
+        # root. Node's attempt layout is <safe-query>_<attempt-id>; the test
+        # adapter uses attempt-<query>.
+        attempt_resolved.relative_to(output_resolved)
+        safe_query = (
+            re.sub(r"[^a-zA-Z0-9_-]+", "-", query_id).strip("-")[:80] or "attempt"
+        )
+        if attempt_resolved == output_resolved or not (
+            attempt_resolved.name.startswith(f"{safe_query}_")
+            or attempt_resolved.name == f"attempt-{query_id}"
+        ):
             raise ArtifactValidationError("evidence directory is not an attempt")
         source_stat = declared_path.lstat()
         if source_stat.st_mode & 0o170000 != 0o100000:
@@ -845,7 +862,9 @@ async def _spawn_attempt(
         outcome = _classify_result(result, output_root, config.timeout_seconds)
         if outcome.doc is not None:
             try:
-                artifact = _raw_artifact_input(outcome.doc, config.staging_root)
+                artifact = _raw_artifact_input(
+                    outcome.doc, config.staging_root, output_root, query_id
+                )
                 bundle = config.evidence_store.finalize_bundle(
                     claim.workspace_id, [artifact]
                 )

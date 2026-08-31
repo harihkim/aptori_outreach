@@ -41,10 +41,9 @@ class Settings(BaseSettings):
     # Durable EvidenceStore root. It is intentionally separate from the
     # retrieval staging tree, including when the two live on different filesystems.
     retrieval_evidence_root: Path = REPO_ROOT / "evidence-runs"
-    # Python-owned scratch space for query input documents. The evidence
-    # output root belongs to the retrieval CLI (ADR ownership); inputs are
-    # staged outside it so the two toolchains never write into each other's
-    # trees.
+    # Python-owned scratch space for query input documents. Inputs are staged
+    # outside the CLI-owned expendable output tree so the two toolchains never
+    # write into each other's trees.
     retrieval_input_scratch_root: Path = REPO_ROOT / "scratch" / "discovery-inputs"
     retrieval_attempt_timeout_seconds: int = Field(default=180, ge=5, le=900)
 
