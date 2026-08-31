@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0011_workspace_ownership"
+HEAD_REVISION = "0012_evidence_bundles"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -43,6 +43,31 @@ def _purge_observations(database_url: str) -> None:
         engine.dispose()
 
 
+def _purge_evidence_bundles(database_url: str) -> None:
+    """Test-only owner cleanup for the two mutually related evidence tables."""
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            # PostgreSQL requires a referenced table and its referencing table
+            # to appear in the same TRUNCATE statement, even when the child is
+            # empty.  Both guards are disabled only for this owner cleanup.
+            connection.execute(
+                text("ALTER TABLE retrieval_observations DISABLE TRIGGER USER")
+            )
+            connection.execute(
+                text("ALTER TABLE evidence_bundles DISABLE TRIGGER USER")
+            )
+            connection.execute(
+                text("TRUNCATE retrieval_observations, evidence_bundles")
+            )
+            connection.execute(text("ALTER TABLE evidence_bundles ENABLE TRIGGER USER"))
+            connection.execute(
+                text("ALTER TABLE retrieval_observations ENABLE TRIGGER USER")
+            )
+    finally:
+        engine.dispose()
+
+
 def observation_count(database_url: str) -> int:
     engine = create_engine(database_url)
     try:
@@ -62,8 +87,8 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
     alembic_cfg = _alembic_config(migrated_test_database)
 
     # A previous suite may have left immutable evidence behind; only the
-    # owner-side purge may empty the table before a full round trip.
-    _purge_observations(migrated_test_database)
+    # owner-side purges may empty the tables before a full round trip.
+    _purge_evidence_bundles(migrated_test_database)
 
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
@@ -82,6 +107,7 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
             "idempotency_events",
             "discovery_runs",
             "retrieval_observations",
+            "evidence_bundles",
         }
         campaign_columns = {
             column["name"] for column in inspect(connection).get_columns("campaigns")
@@ -91,6 +117,48 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
         }
         assert "creation_order" in campaign_columns
         assert "event_order" in audit_columns
+
+        evidence_columns = {
+            column["name"]: column
+            for column in inspect(connection).get_columns("evidence_bundles")
+        }
+        assert set(evidence_columns) == {
+            "id",
+            "workspace_id",
+            "manifest_version",
+            "bundle_sha256",
+            "storage_key",
+            "artifact_manifest",
+            "created_at",
+        }
+        assert all(
+            evidence_columns[name]["nullable"] is False
+            for name in set(evidence_columns) - {"id"}
+        )
+        evidence_uniques = {
+            unique["name"]: tuple(unique["column_names"])
+            for unique in inspect(connection).get_unique_constraints("evidence_bundles")
+        }
+        assert evidence_uniques == {
+            "uq_evidence_bundles_workspace_id_id": ("workspace_id", "id"),
+            "uq_evidence_bundles_workspace_bundle_sha256": (
+                "workspace_id",
+                "bundle_sha256",
+            ),
+            "uq_evidence_bundles_workspace_storage_key": (
+                "workspace_id",
+                "storage_key",
+            ),
+        }
+        observation_columns = {
+            column["name"]: column
+            for column in inspect(connection).get_columns("retrieval_observations")
+        }
+        assert observation_columns["evidence_state"]["nullable"] is False
+        assert all(
+            observation_columns[name]["nullable"] is True
+            for name in ("evidence_bundle_id", "evidence_directory")
+        )
 
 
 def test_migration_seeds_the_default_workspace(migrated_test_database: str) -> None:
@@ -204,7 +272,7 @@ def test_stable_order_migration_backfills_existing_rows(
 
 def _prepare_legacy_ownership_database(database_url: str) -> Config:
     """Return a clean 0010 database for data-dependent migration tests."""
-    _purge_observations(database_url)
+    _purge_evidence_bundles(database_url)
     alembic_cfg = _alembic_config(database_url)
     command.downgrade(alembic_cfg, "0010_obs_workspace_idx")
     return alembic_cfg
@@ -239,6 +307,23 @@ def _finish_legacy_ownership_case(
         _delete_rows(connection, "workspaces", workspace_ids)
     engine.dispose()
     command.upgrade(alembic_cfg, "head")
+
+
+def _finish_evidence_case(
+    database_url: str,
+    engine: Engine,
+    *,
+    campaign_ids: tuple[uuid.UUID, ...] = (),
+    run_ids: tuple[uuid.UUID, ...] = (),
+    workspace_ids: tuple[uuid.UUID, ...] = (),
+) -> None:
+    """Purge immutable evidence, then delete the fixture's parent rows."""
+    _purge_evidence_bundles(database_url)
+    with engine.begin() as connection:
+        _delete_rows(connection, "discovery_runs", run_ids)
+        _delete_rows(connection, "campaigns", campaign_ids)
+        _delete_rows(connection, "workspaces", workspace_ids)
+    engine.dispose()
 
 
 def _insert_row(
@@ -304,23 +389,74 @@ def _insert_observation(
     *,
     query_id: str,
     correlation_id: str,
+    evidence_state: str | None = None,
+    evidence_bundle_id: uuid.UUID | None = None,
+    evidence_directory: str | None = None,
+    status: str = "success",
+    failure_class: str | None = None,
 ) -> None:
+    values: dict[str, Any] = {
+        "id": observation_id,
+        "discovery_run_id": run_id,
+        "workspace_id": workspace_id,
+        "query_id": query_id,
+        "schema_version": 1,
+        "capability": "discovery",
+        "provider_variant": "test",
+        "config_sha256": "a" * 64,
+        "observation_id": f"obs-{query_id}",
+        "status": "success",
+        "evidence_directory": f"/tmp/{query_id}",
+        "correlation_id": correlation_id,
+    }
+    if evidence_state is not None:
+        values.update(
+            {
+                "status": status,
+                "failure_class": failure_class,
+                "evidence_state": evidence_state,
+                "evidence_bundle_id": evidence_bundle_id,
+                "evidence_directory": evidence_directory,
+            }
+        )
     _insert_row(
         connection,
         "retrieval_observations",
+        values,
+    )
+
+
+def _insert_bundle(
+    connection: Connection,
+    bundle_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    *,
+    digest: str,
+    storage_key: str | None = None,
+) -> None:
+    """Insert a minimal bundle row without depending on the storage adapter."""
+    manifest: dict[str, object] = {
+        "artifacts": [
+            {
+                "name": "raw/evidence.json",
+                "role": "retrieval-response",
+                "sha256": digest,
+                "byte_length": 0,
+                "media_type": "application/json",
+            }
+        ]
+    }
+    _insert_row(
+        connection,
+        "evidence_bundles",
         {
-            "id": observation_id,
-            "discovery_run_id": run_id,
+            "id": bundle_id,
             "workspace_id": workspace_id,
-            "query_id": query_id,
-            "schema_version": 1,
-            "capability": "discovery",
-            "provider_variant": "test",
-            "config_sha256": "a" * 64,
-            "observation_id": f"obs-{query_id}",
-            "status": "success",
-            "evidence_directory": f"/tmp/{query_id}",
-            "correlation_id": correlation_id,
+            "manifest_version": "evidence-bundle/v1",
+            "bundle_sha256": digest,
+            "storage_key": storage_key
+            or f"workspaces/{workspace_id}/evidence/{digest}",
+            "artifact_manifest": manifest,
         },
     )
 
@@ -847,3 +983,253 @@ def test_discovery_migration_round_trips_through_previous_revision(
         assert context.get_current_revision() == HEAD_REVISION
         tables = set(inspect(connection).get_table_names())
         assert {"discovery_runs", "retrieval_observations"} <= tables
+
+
+def test_existing_observations_become_legacy_without_payload_rewrite(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+    _purge_evidence_bundles(migrated_test_database)
+    command.downgrade(alembic_cfg, "0011_workspace_ownership")
+    engine = create_engine(migrated_test_database)
+    observation_id = "00000000-0000-0000-0000-000000000009"
+    payload_columns = (
+        "query_id, schema_version, capability, provider_variant, config_sha256, "
+        "observation_id, status, failure_class, evidence_directory, correlation_id"
+    )
+    try:
+        with engine.begin() as connection:
+            _seed_run_and_observation(connection)
+            before = connection.execute(
+                text(
+                    f"SELECT {payload_columns} FROM retrieval_observations WHERE id = :id"
+                ),
+                {"id": observation_id},
+            ).one()
+
+        command.upgrade(alembic_cfg, "head")
+        with engine.connect() as connection:
+            payload_after = connection.execute(
+                text(
+                    f"SELECT {payload_columns} FROM retrieval_observations WHERE id = :id"
+                ),
+                {"id": observation_id},
+            ).one()
+            state, bundle_id = connection.execute(
+                text(
+                    "SELECT evidence_state, evidence_bundle_id "
+                    "FROM retrieval_observations WHERE id = :id"
+                ),
+                {"id": observation_id},
+            ).one()
+        assert state == "legacy"
+        assert bundle_id is None
+        assert payload_after == before
+    finally:
+        _purge_evidence_bundles(migrated_test_database)
+        engine.dispose()
+        command.upgrade(alembic_cfg, "head")
+
+
+def test_evidence_bundle_and_reference_checks_reject_invalid_rows(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.upgrade(alembic_cfg, "head")
+    _purge_evidence_bundles(migrated_test_database)
+    engine = create_engine(migrated_test_database)
+    campaign_id, run_id = uuid.uuid4(), uuid.uuid4()
+    bundle_id = uuid.uuid4()
+    try:
+        with engine.begin() as connection:
+            _insert_campaign(
+                connection, campaign_id, DEFAULT_WORKSPACE_ID, name="evidence-checks"
+            )
+            _insert_run(
+                connection,
+                run_id,
+                DEFAULT_WORKSPACE_ID,
+                campaign_id,
+                correlation_id="evidence-checks",
+            )
+            _insert_bundle(
+                connection,
+                bundle_id,
+                DEFAULT_WORKSPACE_ID,
+                digest="c" * 64,
+            )
+
+        invalid_rows: tuple[
+            tuple[str, uuid.UUID | None, str | None, str, str | None], ...
+        ] = (
+            ("unknown", None, None, "success", None),
+            ("bundle", bundle_id, "/legacy", "success", None),
+            ("legacy", bundle_id, "/legacy", "success", None),
+            ("none", None, None, "success", "transport_error"),
+        )
+        for index, (state, reference, directory, status, failure_class) in enumerate(
+            invalid_rows
+        ):
+            query_id = f"bad-evidence-{index}"
+            with pytest.raises(DBAPIError), engine.begin() as connection:
+                _insert_observation(
+                    connection,
+                    uuid.uuid4(),
+                    run_id,
+                    DEFAULT_WORKSPACE_ID,
+                    query_id=query_id,
+                    correlation_id=query_id,
+                    evidence_state=state,
+                    evidence_bundle_id=reference,
+                    evidence_directory=directory,
+                    status=status,
+                    failure_class=failure_class,
+                )
+    finally:
+        _finish_evidence_case(
+            migrated_test_database,
+            engine,
+            campaign_ids=(campaign_id,),
+            run_ids=(run_id,),
+        )
+
+
+def test_evidence_bundle_guards_reject_update_delete_and_truncate(
+    migrated_test_database: str,
+) -> None:
+    command.upgrade(_alembic_config(migrated_test_database), "head")
+    _purge_evidence_bundles(migrated_test_database)
+    engine = create_engine(migrated_test_database)
+    bundle_id = uuid.uuid4()
+    try:
+        with engine.begin() as connection:
+            _insert_bundle(
+                connection,
+                bundle_id,
+                DEFAULT_WORKSPACE_ID,
+                digest="d" * 64,
+            )
+        with pytest.raises(DBAPIError), engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE evidence_bundles SET storage_key = 'changed' WHERE id = :id"
+                ),
+                {"id": str(bundle_id)},
+            )
+        with pytest.raises(DBAPIError), engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM evidence_bundles WHERE id = :id"),
+                {"id": str(bundle_id)},
+            )
+        with pytest.raises(DBAPIError), engine.begin() as connection:
+            connection.execute(text("TRUNCATE evidence_bundles"))
+    finally:
+        _purge_evidence_bundles(migrated_test_database)
+        engine.dispose()
+
+
+def test_evidence_bundle_foreign_key_rejects_cross_workspace_reference(
+    migrated_test_database: str,
+) -> None:
+    command.upgrade(_alembic_config(migrated_test_database), "head")
+    _purge_evidence_bundles(migrated_test_database)
+    engine = create_engine(migrated_test_database)
+    owner_workspace, other_workspace = uuid.uuid4(), uuid.uuid4()
+    owner_campaign, other_campaign = uuid.uuid4(), uuid.uuid4()
+    owner_run, other_run = uuid.uuid4(), uuid.uuid4()
+    bundle_id = uuid.uuid4()
+    try:
+        with engine.begin() as connection:
+            for workspace_id, name in (
+                (owner_workspace, "bundle-owner"),
+                (other_workspace, "bundle-other"),
+            ):
+                _insert_workspace(connection, workspace_id, name=name)
+            for campaign_id, workspace_id, name in (
+                (owner_campaign, owner_workspace, "bundle-owner"),
+                (other_campaign, other_workspace, "bundle-other"),
+            ):
+                _insert_campaign(connection, campaign_id, workspace_id, name=name)
+            for run_id, workspace_id, campaign_id, name in (
+                (owner_run, owner_workspace, owner_campaign, "bundle-owner"),
+                (other_run, other_workspace, other_campaign, "bundle-other"),
+            ):
+                _insert_run(
+                    connection,
+                    run_id,
+                    workspace_id,
+                    campaign_id,
+                    correlation_id=name,
+                )
+            _insert_bundle(connection, bundle_id, owner_workspace, digest="e" * 64)
+
+        with pytest.raises(DBAPIError), engine.begin() as connection:
+            _insert_observation(
+                connection,
+                uuid.uuid4(),
+                other_run,
+                other_workspace,
+                query_id="cross-workspace-bundle",
+                correlation_id="cross-workspace-bundle",
+                evidence_state="bundle",
+                evidence_bundle_id=bundle_id,
+            )
+    finally:
+        _finish_evidence_case(
+            migrated_test_database,
+            engine,
+            campaign_ids=(owner_campaign, other_campaign),
+            run_ids=(owner_run, other_run),
+            workspace_ids=(owner_workspace, other_workspace),
+        )
+
+
+def test_evidence_bundle_downgrade_guard_reports_loss(
+    migrated_test_database: str,
+) -> None:
+    alembic_cfg = _alembic_config(migrated_test_database)
+    command.upgrade(alembic_cfg, "head")
+    _purge_evidence_bundles(migrated_test_database)
+    engine = create_engine(migrated_test_database)
+    campaign_id, run_id = uuid.uuid4(), uuid.uuid4()
+    try:
+        with engine.begin() as connection:
+            _insert_campaign(
+                connection, campaign_id, DEFAULT_WORKSPACE_ID, name="downgrade-guard"
+            )
+            _insert_run(
+                connection,
+                run_id,
+                DEFAULT_WORKSPACE_ID,
+                campaign_id,
+                correlation_id="downgrade-guard",
+            )
+            _insert_bundle(
+                connection,
+                uuid.uuid4(),
+                DEFAULT_WORKSPACE_ID,
+                digest="f" * 64,
+            )
+            _insert_observation(
+                connection,
+                uuid.uuid4(),
+                run_id,
+                DEFAULT_WORKSPACE_ID,
+                query_id="downgrade-none",
+                correlation_id="downgrade-none",
+                evidence_state="none",
+                status="failed",
+                failure_class="transport_error",
+            )
+
+        with pytest.raises(RuntimeError, match="would lose") as error:
+            command.downgrade(alembic_cfg, "0011_workspace_ownership")
+        assert "Evidence Bundle" in str(error.value)
+        assert "non-legacy" in str(error.value)
+    finally:
+        _finish_evidence_case(
+            migrated_test_database,
+            engine,
+            campaign_ids=(campaign_id,),
+            run_ids=(run_id,),
+        )

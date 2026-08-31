@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.evidence.models import EVIDENCE_STATES, EvidenceBundle  # noqa: F401
 from app.orm import Base
 
 # Wire values for the Discovery lifecycle and retrieval evidence. The
@@ -145,6 +146,11 @@ class RetrievalObservation(Base):
             ["discovery_runs.workspace_id", "discovery_runs.id"],
             name=("fk_retrieval_observations_workspace_run_discovery_runs"),
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "evidence_bundle_id"],
+            ["evidence_bundles.workspace_id", "evidence_bundles.id"],
+            name="fk_retrieval_observations_workspace_evidence_bundle",
+        ),
         CheckConstraint(
             _in_values("capability", OBSERVATION_CAPABILITIES),
             name="capability_values",
@@ -152,6 +158,20 @@ class RetrievalObservation(Base):
         CheckConstraint(
             _in_values("status", RETRIEVAL_OBSERVATION_STATUSES),
             name="status_values",
+        ),
+        CheckConstraint(
+            _in_values("evidence_state", EVIDENCE_STATES),
+            name="evidence_state_values",
+        ),
+        CheckConstraint(
+            "(evidence_state = 'bundle' AND evidence_bundle_id IS NOT NULL "
+            "AND evidence_directory IS NULL) OR "
+            "(evidence_state = 'legacy' AND evidence_bundle_id IS NULL "
+            "AND evidence_directory IS NOT NULL) OR "
+            "(evidence_state = 'none' AND evidence_bundle_id IS NULL "
+            "AND evidence_directory IS NULL AND status = 'failed' "
+            "AND failure_class IS NOT NULL)",
+            name="evidence_reference_values",
         ),
         Index(
             "ix_retrieval_observations_run_creation_order",
@@ -194,7 +214,11 @@ class RetrievalObservation(Base):
     runtime: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     network: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     raw_artifact: Mapped[dict[str, object] | None] = mapped_column(JSONB)
-    evidence_directory: Mapped[str] = mapped_column(Text)
+    evidence_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="legacy", server_default="legacy"
+    )
+    evidence_bundle_id: Mapped[uuid.UUID | None] = mapped_column()
+    evidence_directory: Mapped[str | None] = mapped_column(Text)
     correlation_id: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -3,13 +3,14 @@
 import uuid
 from typing import Any, cast
 
-from sqlalchemy import ForeignKeyConstraint, Table, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Table, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from app.auditing.models import AuditEvent
 from app.auditing.service import record_audit
 from app.campaigns.models import Campaign
 from app.discovery.models import DiscoveryRun, RetrievalObservation
+from app.evidence.models import EvidenceBundle
 from app.idempotency.models import IdempotencyEvent
 
 
@@ -158,3 +159,50 @@ def test_record_audit_carries_the_authoritative_workspace() -> None:
         assert event.workspace_id == workspace_id
     finally:
         session.close()
+
+
+def test_evidence_bundle_model_is_immutable_workspace_scoped_contract() -> None:
+    bundle_table = _table(EvidenceBundle)
+    candidate = _unique_constraint(
+        EvidenceBundle, "uq_evidence_bundles_workspace_id_id"
+    )
+    assert tuple(candidate.columns.keys()) == ("workspace_id", "id")
+    assert bundle_table.c["manifest_version"].server_default is not None
+    assert bundle_table.c["bundle_sha256"].nullable is False
+    assert bundle_table.c["storage_key"].nullable is False
+    assert bundle_table.c["artifact_manifest"].nullable is False
+    assert bundle_table.c["created_at"].nullable is False
+
+    foreign_keys = [
+        constraint
+        for constraint in bundle_table.foreign_key_constraints
+        if constraint.name == "fk_evidence_bundles_workspace_id_workspaces"
+    ]
+    assert len(foreign_keys) == 1
+    assert tuple(foreign_keys[0].column_keys) == ("workspace_id",)
+    assert tuple(element.target_fullname for element in foreign_keys[0].elements) == (
+        "workspaces.id",
+    )
+
+
+def test_observation_evidence_reference_model_is_workspace_scoped() -> None:
+    evidence_fk = _foreign_key_constraint(
+        RetrievalObservation,
+        "fk_retrieval_observations_workspace_evidence_bundle",
+    )
+    assert tuple(evidence_fk.column_keys) == ("workspace_id", "evidence_bundle_id")
+    assert tuple(element.target_fullname for element in evidence_fk.elements) == (
+        "evidence_bundles.workspace_id",
+        "evidence_bundles.id",
+    )
+    observation_table = _table(RetrievalObservation)
+    assert observation_table.c["evidence_state"].nullable is False
+    assert observation_table.c["evidence_bundle_id"].nullable is True
+    assert observation_table.c["evidence_directory"].nullable is True
+    checks = {
+        constraint.name
+        for constraint in observation_table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert "ck_retrieval_observations_evidence_state_values" in checks
+    assert "ck_retrieval_observations_evidence_reference_values" in checks
