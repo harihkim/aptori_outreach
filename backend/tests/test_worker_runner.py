@@ -388,6 +388,7 @@ def test_success_and_no_results_complete_the_run(
     assert success_row.failure_class is None
     assert success_row.candidate_count == 3
     assert success_row.observation_id == "attempt-q-a"
+    assert success_row.evidence_directory is not None
     assert success_row.evidence_directory.endswith("attempt-q-a")
     assert success_row.network == {"requests": 14}
     assert no_results_row.status == "no_results"
