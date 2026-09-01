@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 from app.config import get_settings
-from app.conversations.identity import thread_fetch_query_id
+from app.conversations.identity import is_http_url, thread_fetch_query_id
 
 
 class QueueEnqueueError(RuntimeError):
@@ -102,12 +102,7 @@ async def enqueue_thread_fetch_candidates(
     for candidate in candidates:
         external_id = candidate.get("externalSourceId")
         url = candidate.get("url")
-        if (
-            isinstance(external_id, str)
-            and external_id
-            and isinstance(url, str)
-            and url
-        ):
+        if isinstance(external_id, str) and external_id and is_http_url(url):
             unique.setdefault(external_id, url)
     if not unique:
         return []

@@ -38,6 +38,8 @@ from sqlalchemy.orm import Session
 
 from app.auditing.service import record_audit
 from app.config import get_settings
+from app.conversations import service as conversation_service
+from app.conversations.identity import thread_fetch_query_id
 from app.db import DatabaseSessionManager
 from app.discovery import cli, queue
 from app.discovery import events as progress_events
@@ -1034,7 +1036,100 @@ async def _publish_progress(
     )
 
 
+def _persist_unenqueued_fetches(
+    manager: DatabaseSessionManager,
+    claim: _Claim,
+    candidates: list[dict[str, Any]],
+    failed_external_ids: list[str],
+) -> int:
+    """Record a failed thread-fetch row for every Candidate the queue refused.
+
+    Without a durable row the Candidate would count as expected but never
+    fetched, so Candidate-to-Conversation processing could never complete
+    and every viewer would wait forever. The row is append-only and keyed by
+    the same query id a later successful enqueue would claim, so a recovered
+    queue simply finds it already recorded.
+    """
+    urls: dict[str, str] = {}
+    for candidate in candidates:
+        external_id = candidate.get("externalSourceId")
+        url = candidate.get("url")
+        if isinstance(external_id, str) and isinstance(url, str):
+            urls.setdefault(external_id, url)
+    written = 0
+    with manager.session_factory() as session, session.begin():
+        run = session.scalar(
+            select(DiscoveryRun).where(
+                DiscoveryRun.workspace_id == claim.workspace_id,
+                DiscoveryRun.id == claim.run_id,
+            )
+        )
+        if run is None:
+            return 0
+        for external_id in failed_external_ids:
+            query_id = thread_fetch_query_id(external_id)
+            existing = session.scalar(
+                select(RetrievalObservation.id).where(
+                    RetrievalObservation.workspace_id == claim.workspace_id,
+                    RetrievalObservation.discovery_run_id == claim.run_id,
+                    RetrievalObservation.query_id == query_id,
+                )
+            )
+            if existing is not None:
+                continue
+            session.add(
+                _new_observation(
+                    run,
+                    query_id,
+                    run.correlation_id,
+                    schema_version=1,
+                    provider_variant="unknown-thread-fetch",
+                    config_sha256="0" * 64,
+                    observation_id=f"{run.id}:{query_id}:unenqueued",
+                    status="failed",
+                    evidence_state="none",
+                    capability="thread_fetch",
+                    external_source_id=external_id[:512] or None,
+                    source_url=(urls.get(external_id) or "")[:2048] or None,
+                    failure_class="transport_error",
+                    failure_reason="thread-fetch job was refused by the worker queue",
+                )
+            )
+            written += 1
+        session.flush()
+    return written
+
+
+async def _publish_processing_complete_if_ready(
+    manager: DatabaseSessionManager, claim: _Claim, correlation_id: str
+) -> None:
+    """Close the Candidate-to-Conversation stage from the discovery side.
+
+    Thread-fetch workers publish this event when their own settle completes
+    the stage. When the run turns terminal after every fetch has already
+    settled (a final query with no new Candidates, or refused enqueues), no
+    fetch worker remains to publish it, so the run's completion must.
+    """
+    with manager.session_factory() as session:
+        transitions = conversation_service.list_run_transitions(
+            session, claim.workspace_id, claim.run_id
+        )
+    if transitions.processing_complete:
+        await _publish_progress(
+            event_type="conversation.processing_completed",
+            run_id=claim.run_id,
+            workspace_id=claim.workspace_id,
+            correlation_id=correlation_id,
+            payload={
+                "expected_count": transitions.expected_count,
+                "fetched_count": transitions.fetched_count,
+                "normalized_count": transitions.normalized_count,
+            },
+        )
+
+
 async def _publish_attempt_progress(
+    manager: DatabaseSessionManager,
     claim: _Claim,
     correlation_id: str,
     settlement: _Settlement,
@@ -1055,6 +1150,9 @@ async def _publish_attempt_progress(
             candidates,
         )
     except queue.ThreadFetchQueueError as error:
+        _persist_unenqueued_fetches(
+            manager, claim, candidates, error.failed_external_ids
+        )
         await _publish_progress(
             event_type="job.failed",
             run_id=claim.run_id,
@@ -1105,6 +1203,7 @@ async def _publish_attempt_progress(
                 "metrics": settlement.metrics,
             },
         )
+        await _publish_processing_complete_if_ready(manager, claim, correlation_id)
 
 
 async def run_discovery_query(
@@ -1160,7 +1259,7 @@ async def run_discovery_query(
             claim.planned_ids,
         )
         if settlement.recorded:
-            await _publish_attempt_progress(claim, correlation_id, settlement)
+            await _publish_attempt_progress(manager, claim, correlation_id, settlement)
         return settlement.status
     finally:
         manager.dispose()
