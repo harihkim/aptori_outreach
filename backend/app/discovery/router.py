@@ -18,15 +18,20 @@ from app.deps import PrincipalDep, SessionDep, WorkspaceDep
 from app.discovery import events as progress_events
 from app.discovery import queue, service
 from app.discovery.events import ProgressEvent
-from app.discovery.models import DiscoveryRun
+from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.discovery.schemas import (
+    BundleEvidenceResponse,
     DiscoveryMethodPlan,
     DiscoveryRunCreate,
     DiscoveryRunResponse,
     ErrorResponse,
+    EvidenceResponse,
+    LegacyEvidenceResponse,
+    NoEvidenceResponse,
     ObservationPageResponse,
     RetrievalObservationResponse,
 )
+from app.evidence.models import EvidenceBundle
 from app.idempotency import service as idempotency
 from app.pagination import InvalidCursor
 
@@ -277,11 +282,44 @@ def list_run_observations(
         raise _invalid_cursor() from None
     return ObservationPageResponse(
         items=[
-            RetrievalObservationResponse.model_validate(observation)
-            for observation in observations
+            _observation_response(record.observation, record.bundle)
+            for record in observations
         ],
         next_cursor=next_cursor,
     )
+
+
+def _observation_response(
+    observation: RetrievalObservation,
+    bundle: EvidenceBundle | None,
+) -> RetrievalObservationResponse:
+    """Assemble a path-free observation response from workspace-scoped data."""
+    if observation.evidence_state == "bundle":
+        if bundle is None:
+            raise RuntimeError("bundle evidence reference has no matching bundle")
+        artifacts = bundle.artifact_manifest.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise RuntimeError("bundle evidence manifest has no artifact list")
+        evidence: EvidenceResponse = BundleEvidenceResponse(
+            state="bundle",
+            bundle_id=bundle.id,
+            bundle_sha256=bundle.bundle_sha256,
+            artifact_count=len(artifacts),
+        )
+    elif observation.evidence_state == "legacy":
+        evidence = LegacyEvidenceResponse(state="legacy")
+    elif observation.evidence_state == "none":
+        evidence = NoEvidenceResponse(state="none")
+    else:
+        raise RuntimeError("observation carries an unknown evidence state")
+
+    values = {
+        field_name: getattr(observation, field_name)
+        for field_name in RetrievalObservationResponse.model_fields
+        if field_name != "evidence"
+    }
+    values["evidence"] = evidence
+    return RetrievalObservationResponse.model_validate(values)
 
 
 def _write_response(

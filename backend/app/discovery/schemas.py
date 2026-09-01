@@ -1,10 +1,10 @@
 """Wire contracts for the discovery-run REST boundary."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 RunStatus = Literal["queued", "running", "succeeded", "partial", "failed", "cancelled"]
 
@@ -62,6 +62,39 @@ class DiscoveryRunResponse(BaseModel):
     updated_at: datetime
 
 
+class BundleEvidenceResponse(BaseModel):
+    """Public, path-free summary of a portable evidence bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["bundle"]
+    bundle_id: UUID
+    bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifact_count: int = Field(ge=1)
+
+
+class LegacyEvidenceResponse(BaseModel):
+    """Compatibility marker for observations written before bundling."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["legacy"]
+
+
+class NoEvidenceResponse(BaseModel):
+    """Explicit marker for a failed observation with no retained evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["none"]
+
+
+EvidenceResponse = Annotated[
+    BundleEvidenceResponse | LegacyEvidenceResponse | NoEvidenceResponse,
+    Field(discriminator="state"),
+]
+
+
 class RetrievalObservationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,7 +112,7 @@ class RetrievalObservationResponse(BaseModel):
     candidates: list[Any]
     normalized_sha256: str | None
     elapsed_ms: int | None
-    evidence_directory: str
+    evidence: EvidenceResponse
     correlation_id: str
     started_at: datetime | None
     completed_at: datetime | None

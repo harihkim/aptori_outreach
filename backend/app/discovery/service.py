@@ -6,6 +6,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -22,6 +23,7 @@ from app.discovery.schemas import (
     DiscoveryPlanQuery,
     DiscoveryRunResponse,
 )
+from app.evidence.models import EvidenceBundle
 from app.idempotency import service as idempotency
 from app.pagination import decode_cursor, encode_cursor
 
@@ -53,6 +55,14 @@ class WorkerQueueUnavailable(RuntimeError):
 
 class DiscoveryRunNotFound(LookupError):
     """No run with that id exists, or it belongs to another workspace."""
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationRead:
+    """An observation and its workspace-scoped public evidence source."""
+
+    observation: RetrievalObservation
+    bundle: EvidenceBundle | None
 
 
 def load_frozen_plan(
@@ -254,27 +264,36 @@ def list_run_observations(
     *,
     limit: int,
     cursor: str | None,
-) -> tuple[list[RetrievalObservation], str | None]:
+) -> tuple[list[ObservationRead], str | None]:
     run = get_discovery_run(session, principal, workspace_id, run_id)
-    statement = select(RetrievalObservation).where(
-        RetrievalObservation.workspace_id == workspace_id,
-        RetrievalObservation.discovery_run_id == run.id,
+    statement = (
+        select(RetrievalObservation, EvidenceBundle)
+        .outerjoin(
+            EvidenceBundle,
+            (EvidenceBundle.id == RetrievalObservation.evidence_bundle_id)
+            & (EvidenceBundle.workspace_id == RetrievalObservation.workspace_id),
+        )
+        .where(
+            RetrievalObservation.workspace_id == workspace_id,
+            RetrievalObservation.discovery_run_id == run.id,
+        )
     )
     if cursor is not None:
         statement = statement.where(
             RetrievalObservation.creation_order
             > decode_cursor(OBSERVATION_CURSOR_NAMESPACE, cursor)
         )
-    rows = list(
-        session.scalars(
+    rows = [
+        ObservationRead(observation=observation, bundle=bundle)
+        for observation, bundle in session.execute(
             statement.order_by(RetrievalObservation.creation_order.asc()).limit(
                 limit + 1
             )
-        )
-    )
+        ).all()
+    ]
     page = rows[:limit]
     next_cursor = (
-        encode_cursor(OBSERVATION_CURSOR_NAMESPACE, page[-1].creation_order)
+        encode_cursor(OBSERVATION_CURSOR_NAMESPACE, page[-1].observation.creation_order)
         if len(rows) > limit
         else None
     )

@@ -193,7 +193,17 @@ def run_rows(engine_url: str, query: str, params: dict[str, Any]) -> list[Any]:
         engine.dispose()
 
 
-def insert_observation(engine_url: str, run_id: str, qid: str, status: str) -> None:
+def insert_observation(
+    engine_url: str,
+    run_id: str,
+    qid: str,
+    status: str,
+    *,
+    evidence_state: str = "legacy",
+    evidence_bundle_id: uuid.UUID | None = None,
+    failure_class: str | None = None,
+    failure_reason: str | None = None,
+) -> None:
     from app.discovery.models import RetrievalObservation
 
     engine = create_engine(engine_url)
@@ -210,8 +220,15 @@ def insert_observation(engine_url: str, run_id: str, qid: str, status: str) -> N
                     config_sha256="0" * 64,
                     observation_id=f"attempt-{qid}",
                     status=status,
-                    evidence_state="legacy",
-                    evidence_directory=f"/evidence-runs/{run_id}/attempt-{qid}",
+                    evidence_state=evidence_state,
+                    evidence_bundle_id=evidence_bundle_id,
+                    evidence_directory=(
+                        f"/evidence-runs/{run_id}/attempt-{qid}"
+                        if evidence_state == "legacy"
+                        else None
+                    ),
+                    failure_class=failure_class,
+                    failure_reason=failure_reason,
                     correlation_id="corr-api-test",
                 )
             )
@@ -639,13 +656,120 @@ def test_observations_page_walks_creation_order_with_cursor(
         "candidates",
         "normalized_sha256",
         "elapsed_ms",
-        "evidence_directory",
+        "evidence",
         "correlation_id",
         "started_at",
         "completed_at",
         "created_at",
     }
     assert item["failure_class"] is None
+    assert item["evidence"] == {"state": "legacy"}
+
+
+def test_observations_serialize_all_evidence_states_without_storage_leakage(
+    api: TestClient,
+    fake_enqueue: FakeEnqueue,
+    discovery_database_url: str,
+) -> None:
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = body["id"]
+    bundle_id = uuid.uuid4()
+    bundle_sha256 = hashlib.sha256(bundle_id.bytes).hexdigest()
+    engine = create_engine(discovery_database_url)
+    try:
+        from app.evidence.models import EVIDENCE_BUNDLE_MANIFEST_VERSION, EvidenceBundle
+
+        with Session(engine) as session:
+            session.add(
+                EvidenceBundle(
+                    id=bundle_id,
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    bundle_sha256=bundle_sha256,
+                    storage_key=f"workspace/secret-storage-key/{bundle_sha256}",
+                    artifact_manifest={
+                        "manifest_version": EVIDENCE_BUNDLE_MANIFEST_VERSION,
+                        "artifacts": [
+                            {
+                                "name": "raw/observation.json",
+                                "role": "raw",
+                                "sha256": "b" * 64,
+                                "byte_length": 12,
+                                "media_type": "application/json",
+                            }
+                        ],
+                    },
+                )
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+
+    insert_observation(
+        discovery_database_url,
+        run_id,
+        "q01-bundle",
+        "success",
+        evidence_state="bundle",
+        evidence_bundle_id=bundle_id,
+    )
+    insert_observation(
+        discovery_database_url,
+        run_id,
+        "q02-legacy",
+        "success",
+    )
+    insert_observation(
+        discovery_database_url,
+        run_id,
+        "q03-none",
+        "failed",
+        evidence_state="none",
+        failure_class="evidence_unreadable",
+        failure_reason="raw evidence could not be persisted",
+    )
+
+    response = api.get(f"/discovery-runs/{run_id}/observations")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["evidence"] for item in items] == [
+        {
+            "state": "bundle",
+            "bundle_id": str(bundle_id),
+            "bundle_sha256": bundle_sha256,
+            "artifact_count": 1,
+        },
+        {"state": "legacy"},
+        {"state": "none"},
+    ]
+    serialized = response.text
+    assert "evidence_directory" not in serialized
+    assert "storage_key" not in serialized
+    assert "secret-storage-key" not in serialized
+    assert "observation.json" not in serialized
+
+
+def test_observations_openapi_declares_closed_discriminated_evidence_union(
+    api: TestClient,
+) -> None:
+    schema = api.get("/openapi.json").json()
+    response_schema = schema["components"]["schemas"]["RetrievalObservationResponse"]
+    evidence_schema = response_schema["properties"]["evidence"]
+
+    assert evidence_schema["discriminator"] == {
+        "propertyName": "state",
+        "mapping": {
+            "bundle": "#/components/schemas/BundleEvidenceResponse",
+            "legacy": "#/components/schemas/LegacyEvidenceResponse",
+            "none": "#/components/schemas/NoEvidenceResponse",
+        },
+    }
+    assert {schema["$ref"] for schema in evidence_schema["oneOf"]} == {
+        "#/components/schemas/BundleEvidenceResponse",
+        "#/components/schemas/LegacyEvidenceResponse",
+        "#/components/schemas/NoEvidenceResponse",
+    }
+    assert "evidence_directory" not in json.dumps(schema)
+    assert "storage_key" not in json.dumps(schema)
 
 
 def test_api_never_recomputes_metrics_from_direct_rows(
