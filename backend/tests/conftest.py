@@ -7,7 +7,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from psycopg import connect, sql
+from pydantic_ai import models as pydantic_ai_models
 from sqlalchemy.engine import make_url
+
+# Default block on accidental real model requests: every LLM Task test must
+# inject TestModel/FunctionModel explicitly. A production endpoint reached
+# from the suite records `model_requests_blocked` instead of spending.
+pydantic_ai_models.ALLOW_MODEL_REQUESTS = False  # pyrefly: ignore[bad-assignment]
 
 TEST_DATABASE_URL = os.environ.get(
     "APTORI_TEST_DATABASE_URL",
