@@ -43,6 +43,7 @@ def clean_campaign_rows(migrated_test_database: str) -> Iterator[None]:
     with create_engine(migrated_test_database).begin() as connection:
         connection.execute(text("DELETE FROM audit_events"))
         connection.execute(text("DELETE FROM idempotency_events"))
+        connection.execute(text("DELETE FROM discovery_runs"))
         connection.execute(text("DELETE FROM campaigns"))
         # Tests may plant foreign workspaces to prove scoping, and one test
         # removes the seeded default to prove fail-closed behavior; restore
@@ -757,6 +758,7 @@ def test_requests_fail_closed_when_the_default_workspace_is_missing(
 ) -> None:
     with create_engine(migrated_test_database).begin() as connection:
         connection.execute(text("DELETE FROM idempotency_events"))
+        connection.execute(text("DELETE FROM discovery_runs"))
         connection.execute(text("DELETE FROM campaigns"))
         connection.execute(text("DELETE FROM workspaces"))
 

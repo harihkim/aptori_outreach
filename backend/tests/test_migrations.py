@@ -769,7 +769,9 @@ def test_ownership_migration_rejects_unknown_audit_target_before_ddl(
         )
 
 
-def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
+def _seed_run_and_observation(
+    connection: Connection, *, evidence_state_available: bool = True
+) -> tuple[str, str]:
     """Insert one campaign, discovery run, and retrieval observation; return their ids."""
     campaign_id = "00000000-0000-0000-0000-000000000007"
     run_id = "00000000-0000-0000-0000-000000000008"
@@ -796,15 +798,17 @@ def _seed_run_and_observation(connection: Connection) -> tuple[str, str]:
             "campaign": campaign_id,
         },
     )
+    evidence_state_column = ", evidence_state" if evidence_state_available else ""
+    evidence_state_value = ", 'legacy'" if evidence_state_available else ""
     connection.execute(
         text(
             "INSERT INTO retrieval_observations "
             "(id, discovery_run_id, workspace_id, query_id, schema_version, capability, "
-            "provider_variant, config_sha256, observation_id, status, evidence_directory, "
-            "correlation_id) "
+            "provider_variant, config_sha256, observation_id, status"
+            f"{evidence_state_column}, evidence_directory, correlation_id) "
             "VALUES (:id, :run, :workspace, 'q-1', 1, 'discovery', 'test-variant', :config, "
-            "'obs-1', 'success', '/tmp/evidence/obs-1', 'corr-immutable') "
-            "ON CONFLICT (id) DO NOTHING"
+            f"'obs-1', 'success'{evidence_state_value}, '/tmp/evidence/obs-1', "
+            "'corr-immutable') ON CONFLICT (id) DO NOTHING"
         ),
         {
             "id": observation_id,
@@ -898,11 +902,11 @@ def test_failure_class_check_round_trips(migrated_test_database: str) -> None:
                 "INSERT INTO retrieval_observations "
                 "(id, discovery_run_id, workspace_id, query_id, schema_version, "
                 "capability, provider_variant, config_sha256, observation_id, "
-                "status, failure_class, evidence_directory, correlation_id) "
+                "status, failure_class, evidence_state, evidence_directory, correlation_id) "
                 "VALUES ('00000000-0000-0000-0000-00000000000a', "
                 "'00000000-0000-0000-0000-000000000008', :workspace, 'q-bogus', "
                 "1, 'discovery', 'test-variant', :config, 'obs-bogus', 'failed', "
-                "'totally_made_up_class', '/tmp/evidence/bogus', 'corr-bogus')"
+                "'totally_made_up_class', 'legacy', '/tmp/evidence/bogus', 'corr-bogus')"
             ),
             {"workspace": str(DEFAULT_WORKSPACE_ID), "config": "b" * 64},
         )
@@ -999,7 +1003,7 @@ def test_existing_observations_become_legacy_without_payload_rewrite(
     )
     try:
         with engine.begin() as connection:
-            _seed_run_and_observation(connection)
+            _seed_run_and_observation(connection, evidence_state_available=False)
             before = connection.execute(
                 text(
                     f"SELECT {payload_columns} FROM retrieval_observations WHERE id = :id"
@@ -1026,9 +1030,9 @@ def test_existing_observations_become_legacy_without_payload_rewrite(
         assert bundle_id is None
         assert payload_after == before
     finally:
-        _purge_evidence_bundles(migrated_test_database)
         engine.dispose()
         command.upgrade(alembic_cfg, "head")
+        _purge_evidence_bundles(migrated_test_database)
 
 
 def test_evidence_bundle_and_reference_checks_reject_invalid_rows(

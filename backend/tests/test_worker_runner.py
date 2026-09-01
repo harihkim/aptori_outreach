@@ -453,7 +453,7 @@ def test_success_and_no_results_complete_the_run(
     assert list(staged_input.parent.glob("input-q-b.json"))
     leaked_inputs = [path.name for path in harness.evidence_root.rglob("input-*.json")]
     assert leaked_inputs == []
-    assert not harness.staging_root.exists()
+    assert not (harness.staging_root / str(run_id)).exists()
 
 
 def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -> None:
