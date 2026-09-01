@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0014_conversations"
+HEAD_REVISION = "0015_analysis_opportunities"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -37,6 +37,9 @@ def _purge_observations(database_url: str) -> None:
             tables[:0] = [
                 table
                 for table in (
+                    "opportunities",
+                    "analyses",
+                    "model_runs",
                     "conversation_version_observations",
                     "conversation_versions",
                     "conversations",
@@ -64,6 +67,9 @@ def _purge_evidence_bundles(database_url: str) -> None:
             tables = [
                 table
                 for table in (
+                    "opportunities",
+                    "analyses",
+                    "model_runs",
                     "conversation_version_observations",
                     "conversation_versions",
                     "conversations",
@@ -124,6 +130,9 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
             "conversations",
             "conversation_versions",
             "conversation_version_observations",
+            "model_runs",
+            "analyses",
+            "opportunities",
         }
         campaign_columns = {
             column["name"] for column in inspect(connection).get_columns("campaigns")
