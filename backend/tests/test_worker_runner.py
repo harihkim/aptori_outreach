@@ -40,6 +40,7 @@ from app.conversations.models import (
 from app.conversations.normalizer import NORMALIZER_VERSION, normalize_reddit_thread
 from app.conversations.runner import run_thread_fetch
 from app.discovery import events as progress_events
+from app.discovery import queue as discovery_queue
 from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.discovery.observations import STATUS_VALUES
@@ -586,6 +587,9 @@ def test_worker_publishes_live_progress_after_persisting_observation(
         "discovery.candidate_found",
         "retrieval.observed",
         "discovery.completed",
+        # The fixture Candidate carries no externalSourceId, so nothing is
+        # expected downstream and the run's completion closes the stage.
+        "conversation.processing_completed",
     ]
     assert all(item.run_id == run_id for item in bus.events)
     assert all(item.workspace_id == DEFAULT_WORKSPACE_ID for item in bus.events)
@@ -1440,3 +1444,98 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     minutes = reaper_cron.minute
     assert isinstance(minutes, set)
     assert sorted(minutes) == list(range(0, 60, 5))  # every 300 seconds
+
+
+def test_refused_enqueue_persists_failed_fetch_rows_and_closes_processing(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Candidate the queue refuses must not keep processing open forever."""
+    # Conversations are Workspace-scoped identities shared across runs, so
+    # this Candidate must not collide with one another test normalized.
+    external_id = f"t3_{uuid.uuid4().hex[:10]}"
+    candidate = {
+        "rank": 1,
+        "url": f"https://www.reddit.com/r/example/comments/{external_id[3:]}/x/",
+        "externalSourceId": external_id,
+        "title": "Example",
+    }
+    harness.write_doc(
+        "q-a", fixture_doc("q-a", "success", candidateCount=1, candidates=[candidate])
+    )
+
+    async def refuse(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        raise discovery_queue.ThreadFetchQueueError([external_id])
+
+    monkeypatch.setattr("app.discovery.queue.enqueue_thread_fetch_candidates", refuse)
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+    run_id = seed_run(worker_db, correlation_id="corr-refused", query_ids=["q-a"])
+
+    assert invoke(run_id, "q-a", correlation_id="corr-refused") == "succeeded"
+
+    rows = load_rows(worker_db, run_id)
+    assert [row.capability for row in rows] == ["discovery", "thread_fetch"]
+    refused = rows[1]
+    assert refused.status == "failed"
+    assert refused.failure_class == "transport_error"
+    assert refused.evidence_state == "none"
+    assert refused.external_source_id == external_id
+    assert refused.source_url == candidate["url"]
+    assert refused.query_id == thread_fetch_query_id(external_id)
+    assert [item.type for item in bus.events] == [
+        "discovery.started",
+        "job.failed",
+        "discovery.candidate_found",
+        "retrieval.observed",
+        "discovery.completed",
+        "conversation.processing_completed",
+    ]
+    assert bus.events[-1].payload == {
+        "expected_count": 1,
+        "fetched_count": 1,
+        "normalized_count": 0,
+    }
+
+    # Replaying the settled query is a no-op and never duplicates the row.
+    assert invoke(run_id, "q-a", correlation_id="corr-refused") == "already_done"
+    assert len(load_rows(worker_db, run_id)) == 2
+
+
+def test_non_http_candidate_urls_are_neither_enqueued_nor_expected(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [
+        {
+            "rank": 1,
+            "url": "reddit.com/r/example/comments/a/",
+            "externalSourceId": "t3_a",
+        },
+        {"rank": 2, "url": "ftp://example.test/b", "externalSourceId": "t3_b"},
+    ]
+    harness.write_doc(
+        "q-a", fixture_doc("q-a", "success", candidateCount=2, candidates=candidates)
+    )
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+    run_id = seed_run(worker_db, correlation_id="corr-nonhttp", query_ids=["q-a"])
+
+    # No Redis is configured for tests: reaching the pool would raise, so the
+    # early return on an empty enqueue set is itself the assertion.
+    assert invoke(run_id, "q-a", correlation_id="corr-nonhttp") == "succeeded"
+
+    engine = create_engine(worker_db)
+    try:
+        with Session(engine) as session:
+            transitions = conversation_service.list_run_transitions(
+                session, DEFAULT_WORKSPACE_ID, run_id
+            )
+    finally:
+        engine.dispose()
+    assert transitions.expected_count == 0
+    assert transitions.processing_complete is True
+    assert bus.events[-1].type == "conversation.processing_completed"

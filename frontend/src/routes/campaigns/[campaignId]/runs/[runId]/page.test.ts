@@ -601,6 +601,61 @@ describe('discovery run page', () => {
 		expect(invalidate).not.toHaveBeenCalled();
 	});
 
+	it('keeps polling a terminal run until conversation processing is durably complete', async () => {
+		vi.useFakeTimers();
+		render(Page, {
+			data: pageData(runBody({ status: 'succeeded' }), [], null, {
+				items: [],
+				expected_count: 2,
+				fetched_count: 1,
+				normalized_count: 0,
+				processing_complete: false
+			})
+		});
+
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not poll when the run was not found', async () => {
+		vi.useFakeTimers();
+		render(Page, {
+			data: {
+				runState: { apiReachable: true, run: null, detail: 'Discovery run not found.' },
+				observationsState: {
+					apiReachable: false,
+					items: [],
+					nextCursor: null,
+					detail: 'Discovery run not found.'
+				},
+				conversationsState: {
+					apiReachable: false,
+					items: [],
+					expectedCount: 0,
+					fetchedCount: 0,
+					normalizedCount: 0,
+					processingComplete: false,
+					detail: 'Discovery run not found.'
+				},
+				params: { campaignId: 'c', runId: 'r' }
+			}
+		});
+
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it('does not treat an unreadable transition answer for a terminal run as live work', async () => {
+		vi.useFakeTimers();
+		render(Page, {
+			data: pageData(runBody({ status: 'succeeded' }), [], null, { items: 'nope' })
+		});
+
+		expect(screen.getByRole('alert')).toHaveTextContent('Unexpected response (HTTP 200)');
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(invalidate).not.toHaveBeenCalled();
+	});
+
 	it('says so when older observations are hidden behind a cursor', () => {
 		vi.useFakeTimers();
 		render(
