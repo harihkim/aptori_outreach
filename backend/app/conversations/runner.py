@@ -15,7 +15,7 @@ from app.conversations import service
 from app.conversations.identity import thread_fetch_query_id
 from app.conversations.normalizer import NormalizationError
 from app.db import DatabaseSessionManager
-from app.discovery import cli
+from app.discovery import cli, queue
 from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
@@ -346,6 +346,55 @@ async def _publish(
     )
 
 
+def _campaign_id_for_run(
+    manager: DatabaseSessionManager, claim: _ThreadClaim
+) -> uuid.UUID | None:
+    with manager.session_factory() as session:
+        return session.scalar(
+            select(DiscoveryRun.campaign_id).where(
+                DiscoveryRun.workspace_id == claim.workspace_id,
+                DiscoveryRun.id == claim.run_id,
+            )
+        )
+
+
+async def _enqueue_analysis(
+    manager: DatabaseSessionManager,
+    claim: _ThreadClaim,
+    conversation_id: uuid.UUID,
+    version_id: uuid.UUID,
+) -> None:
+    """Hand the new Version to the analysis worker; refusal is loud, not fatal.
+
+    A refused enqueue leaves the Conversation Version durable and replayable
+    (the same job id re-enqueues later); the failure is published so the
+    operator sees analysis did not start rather than waiting for a score.
+    """
+    campaign_id = _campaign_id_for_run(manager, claim)
+    if campaign_id is None:
+        return
+    try:
+        await queue.enqueue_conversation_analysis(
+            claim.workspace_id,
+            campaign_id,
+            conversation_id,
+            version_id,
+            claim.correlation_id,
+            discovery_run_id=claim.run_id,
+        )
+    except queue.AnalysisQueueError as error:
+        await _publish(
+            claim,
+            "job.failed",
+            {
+                "job": "analysis_enqueue",
+                "conversation_id": str(conversation_id),
+                "conversation_version_id": str(version_id),
+                "error_class": type(error).__name__,
+            },
+        )
+
+
 async def _publish_processing_complete_if_ready(
     manager: DatabaseSessionManager, claim: _ThreadClaim
 ) -> None:
@@ -465,6 +514,9 @@ async def run_thread_fetch(
                     "version_created": record.version_created,
                     "provenance_created": record.provenance_created,
                 },
+            )
+            await _enqueue_analysis(
+                manager, claim, record.conversation.id, record.version.id
             )
             result = "normalized"
         else:
