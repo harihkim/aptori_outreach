@@ -1026,3 +1026,79 @@ def test_api_distinguishes_unpriced_from_zero(
     assert metrics["cost_status"] == "unpriced"
     assert metrics["usage"]["request_count"] == 14
     assert metrics["usage"]["bytes_transferred"] is None
+
+
+def test_run_events_stay_open_until_conversation_processing_completes(
+    api: TestClient,
+    fake_enqueue: FakeEnqueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """discovery.completed no longer ends the stream; the processing event does."""
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = uuid.UUID(body["id"])
+    workspace_id = uuid.UUID(body["workspace_id"])
+    correlation_id = body["correlation_id"]
+
+    def progress(event_type: str, payload: dict[str, object]) -> ProgressEvent:
+        return ProgressEvent.create(
+            event_type=event_type,
+            run_id=run_id,
+            workspace_id=workspace_id,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+
+    bus = FakeEventBus(
+        [
+            progress("discovery.completed", {"status": "succeeded"}),
+            progress("conversation.normalized", {"external_source_id": "t3_x"}),
+            progress(
+                "conversation.processing_completed",
+                {"expected_count": 1, "fetched_count": 1, "normalized_count": 1},
+            ),
+            progress("discovery.started", {"status": "running"}),
+        ]
+    )
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+
+    with api.stream("GET", f"/discovery-runs/{run_id}/events") as response:
+        assert response.status_code == 200
+        raw = response.read().decode()
+
+    assert "event: discovery.completed" in raw
+    assert "event: conversation.normalized" in raw
+    assert "event: conversation.processing_completed" in raw
+    # The stream closed on the processing event, not on discovery completion.
+    assert "event: discovery.started" not in raw
+
+
+def test_conversation_transitions_drop_non_http_candidates_instead_of_failing(
+    api: TestClient, fake_enqueue: FakeEnqueue, discovery_database_url: str
+) -> None:
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = body["id"]
+    good_id = f"t3_{uuid.uuid4().hex}"
+    insert_observation(
+        discovery_database_url,
+        run_id,
+        f"discovery-{uuid.uuid4().hex}",
+        "success",
+        candidates=[
+            {"externalSourceId": "t3_noscheme", "url": "reddit.com/r/x/comments/a/"},
+            {"externalSourceId": "t3_ftp", "url": "ftp://example.test/b", "rank": 2},
+            {
+                "externalSourceId": good_id,
+                "url": f"https://www.reddit.com/r/x/comments/{good_id[3:]}/",
+                "title": "Kept",
+                "rank": 3,
+            },
+        ],
+    )
+
+    response = api.get(f"/discovery-runs/{run_id}/conversations")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["external_source_id"] for item in payload["items"]] == [good_id]
+    assert payload["expected_count"] == 1
+    assert payload["items"][0]["state"] == "candidate"

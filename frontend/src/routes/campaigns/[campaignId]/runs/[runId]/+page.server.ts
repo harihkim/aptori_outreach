@@ -46,24 +46,20 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 		};
 	}
 
-	const observationsResult = await callApi(
-		fetch,
-		'GET',
-		`/discovery-runs/${params.runId}/observations?limit=100`,
-		null,
-		{ timeoutMs: 3000 }
-	);
+	// Independent reads; fetch them together so a slow one does not stack
+	// its timeout on top of the other's.
+	const [observationsResult, conversationsResult] = await Promise.all([
+		callApi(fetch, 'GET', `/discovery-runs/${params.runId}/observations?limit=100`, null, {
+			timeoutMs: 3000
+		}),
+		callApi(fetch, 'GET', `/discovery-runs/${params.runId}/conversations`, null, {
+			timeoutMs: 3000
+		})
+	]);
 	const observationsState = parseObservationsResponse({
 		httpStatus: observationsResult.status ?? null,
 		body: observationsResult.body
 	});
-	const conversationsResult = await callApi(
-		fetch,
-		'GET',
-		`/discovery-runs/${params.runId}/conversations`,
-		null,
-		{ timeoutMs: 3000 }
-	);
 	const conversationsState = parseConversationsResponse({
 		httpStatus: conversationsResult.status ?? null,
 		body: conversationsResult.body
