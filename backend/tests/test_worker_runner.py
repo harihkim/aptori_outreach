@@ -758,6 +758,39 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
     monkeypatch.setattr(
         conversation_service, "normalize_observation", assert_committed_then_normalize
     )
+    analysis_jobs: list[dict[str, object]] = []
+
+    async def fake_analysis_enqueue(*args: object, **kwargs: object) -> str:
+        del args
+        analysis_jobs.append(dict(kwargs))
+        return "analysis-job"
+
+    async def fake_analysis_enqueue_positional(
+        workspace_id: object,
+        campaign_id: object,
+        conversation_id: object,
+        conversation_version_id: object,
+        correlation_id: str,
+        *,
+        discovery_run_id: object = None,
+    ) -> str:
+        analysis_jobs.append(
+            {
+                "workspace_id": workspace_id,
+                "campaign_id": campaign_id,
+                "conversation_id": conversation_id,
+                "conversation_version_id": conversation_version_id,
+                "correlation_id": correlation_id,
+                "discovery_run_id": discovery_run_id,
+            }
+        )
+        return "analysis-job"
+
+    del fake_analysis_enqueue
+    monkeypatch.setattr(
+        "app.discovery.queue.enqueue_conversation_analysis",
+        fake_analysis_enqueue_positional,
+    )
     result = asyncio.run(
         run_thread_fetch(
             None,
@@ -780,6 +813,13 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
         "conversation.normalized",
         "conversation.processing_completed",
     ]
+    # Normalization hands the new Version to the analysis worker for the
+    # run's Campaign; Redis is never touched in tests.
+    assert len(analysis_jobs) == 1
+    assert analysis_jobs[0]["workspace_id"] == DEFAULT_WORKSPACE_ID
+    assert analysis_jobs[0]["campaign_id"] == load_run(worker_db, run_id).campaign_id
+    assert analysis_jobs[0]["correlation_id"] == "corr-thread"
+    assert analysis_jobs[0]["discovery_run_id"] == run_id
     engine = create_engine(worker_db)
     try:
         with Session(engine) as session:
@@ -1417,10 +1457,15 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     """The worker runs exactly the deployed configuration: no override channel."""
     from arq.connections import RedisSettings
 
+    from app.analysis.runner import run_conversation_analysis
     from app.conversations.runner import run_thread_fetch
     from app.discovery.worker import WorkerSettings
 
-    assert WorkerSettings.functions == [run_discovery_query, run_thread_fetch]
+    assert WorkerSettings.functions == [
+        run_discovery_query,
+        run_thread_fetch,
+        run_conversation_analysis,
+    ]
     parameters = inspect.signature(run_discovery_query).parameters
     assert list(parameters) == [
         "ctx",
