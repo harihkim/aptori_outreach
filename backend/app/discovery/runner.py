@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 from app.auditing.service import record_audit
 from app.config import get_settings
 from app.db import DatabaseSessionManager
-from app.discovery import cli
+from app.discovery import cli, queue
 from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import (
@@ -203,15 +203,18 @@ def _new_observation(
     observation_id: str,
     status: str,
     evidence_state: str,
+    capability: str = EXPECTED_CAPABILITY,
     evidence_bundle_id: uuid.UUID | None = None,
     evidence_directory: str | None = None,
     failure_class: str | None = None,
     failure_reason: str | None = None,
     source_url: str | None = None,
     final_url: str | None = None,
+    external_source_id: str | None = None,
     candidate_count: int = 0,
     candidates: list[dict[str, Any]] | None = None,
     normalized_sha256: str | None = None,
+    normalized_content_sha256: str | None = None,
     elapsed_ms: int | None = None,
     started_at: datetime | None = None,
     completed_at: datetime | None = None,
@@ -225,7 +228,7 @@ def _new_observation(
         workspace_id=run.workspace_id,
         query_id=query_id,
         schema_version=schema_version,
-        capability=EXPECTED_CAPABILITY,
+        capability=capability,
         provider_variant=provider_variant,
         config_sha256=config_sha256,
         observation_id=observation_id,
@@ -236,11 +239,11 @@ def _new_observation(
         ),
         source_url=source_url,
         final_url=final_url,
-        external_source_id=None,
+        external_source_id=external_source_id,
         candidate_count=candidate_count,
         candidates=candidates or [],
         normalized_sha256=normalized_sha256,
-        normalized_content_sha256=None,
+        normalized_content_sha256=normalized_content_sha256,
         elapsed_ms=elapsed_ms,
         started_at=started_at,
         completed_at=completed_at,
@@ -395,7 +398,11 @@ def _outcome_to_row(
 
 
 def _classify_result(
-    result: cli.CliResult, output_root: Path, timeout_seconds: float
+    result: cli.CliResult,
+    output_root: Path,
+    timeout_seconds: float,
+    *,
+    expected_capability: str = EXPECTED_CAPABILITY,
 ) -> _AttemptOutcome:
     """Turn a finished CLI attempt into a persisted outcome; raises nothing."""
     if result.timed_out:
@@ -458,13 +465,13 @@ def _classify_result(
                     f"observation document violates the wire contract: {error}"
                 ),
             )
-        if doc.capability != EXPECTED_CAPABILITY:
+        if doc.capability != expected_capability:
             return _AttemptOutcome(
                 evidence_directory=doc.evidence_directory,
                 failure_class="contract_violation",
                 failure_reason=(
                     f"observation capability {doc.capability!r} is not "
-                    f"{EXPECTED_CAPABILITY!r}"
+                    f"{expected_capability!r}"
                 ),
             )
         return _AttemptOutcome(evidence_directory=doc.evidence_directory, doc=doc)
@@ -1037,9 +1044,29 @@ async def _publish_attempt_progress(
     if observation is None:
         return
 
-    for candidate in observation.candidates:
-        if not isinstance(candidate, dict):
-            continue
+    candidates = [
+        candidate for candidate in observation.candidates if isinstance(candidate, dict)
+    ]
+    try:
+        await queue.enqueue_thread_fetch_candidates(
+            claim.workspace_id,
+            claim.run_id,
+            correlation_id,
+            candidates,
+        )
+    except queue.ThreadFetchQueueError as error:
+        await _publish_progress(
+            event_type="job.failed",
+            run_id=claim.run_id,
+            workspace_id=claim.workspace_id,
+            correlation_id=correlation_id,
+            payload={
+                "job": "thread_fetch_enqueue",
+                "failed_count": len(error.failed_external_ids),
+            },
+        )
+
+    for candidate in candidates:
         await _publish_progress(
             event_type="discovery.candidate_found",
             run_id=claim.run_id,

@@ -67,10 +67,16 @@ class ObservationDocument(BaseModel):
     input: dict[str, Any] | None = None
     source_url: str | None = Field(default=None, alias="sourceUrl", max_length=2048)
     final_url: str | None = Field(default=None, alias="finalUrl", max_length=2048)
+    external_source_id: str | None = Field(
+        default=None, alias="externalSourceId", max_length=512
+    )
     response: dict[str, Any] | None = None
     raw_artifact: dict[str, Any] | None = Field(default=None, alias="rawArtifact")
     normalized_sha256: str | None = Field(
         default=None, alias="normalizedSha256", max_length=64
+    )
+    normalized_content_sha256: str | None = Field(
+        default=None, alias="normalizedContentSha256", max_length=64
     )
     candidate_count: int | None = Field(default=None, alias="candidateCount")
     candidates: list[dict[str, Any]] | None = None

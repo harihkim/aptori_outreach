@@ -14,8 +14,10 @@ response; deterministic job ids make the documented same-key retry safe.
 """
 
 import uuid
+from typing import Any
 
 from app.config import get_settings
+from app.conversations.identity import thread_fetch_query_id
 
 
 class QueueEnqueueError(RuntimeError):
@@ -31,6 +33,16 @@ class QueueEnqueueError(RuntimeError):
             f"worker queue refused {len(failed)} discovery job(s) [{details}]; "
             f"job ids enqueued before failure: {enqueued}. Retrying re-enqueues "
             "deterministically without duplicating work."
+        )
+
+
+class ThreadFetchQueueError(RuntimeError):
+    """One or more Candidate fetch jobs were refused by the queue."""
+
+    def __init__(self, failed_external_ids: list[str]) -> None:
+        self.failed_external_ids = failed_external_ids
+        super().__init__(
+            f"worker queue refused {len(failed_external_ids)} thread-fetch job(s)"
         )
 
 
@@ -72,5 +84,57 @@ async def enqueue_discovery_queries(
         if failed:
             raise QueueEnqueueError(enqueued=enqueued_ids, failed=failed) from None
         return enqueued_ids
+    finally:
+        await pool.aclose()
+
+
+async def enqueue_thread_fetch_candidates(
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    correlation_id: str,
+    candidates: list[dict[str, Any]],
+) -> list[str]:
+    """Enqueue one deterministic fetch per unique durable Candidate identity."""
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    unique: dict[str, str] = {}
+    for candidate in candidates:
+        external_id = candidate.get("externalSourceId")
+        url = candidate.get("url")
+        if (
+            isinstance(external_id, str)
+            and external_id
+            and isinstance(url, str)
+            and url
+        ):
+            unique.setdefault(external_id, url)
+    if not unique:
+        return []
+
+    pool = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+    try:
+        enqueued: list[str] = []
+        failed: list[str] = []
+        for external_id, url in unique.items():
+            query_id = thread_fetch_query_id(external_id)
+            job_id = f"thread-fetch:{workspace_id}:{run_id}:{query_id}"
+            try:
+                await pool.enqueue_job(
+                    "run_thread_fetch",
+                    workspace_id=str(workspace_id),
+                    run_id=str(run_id),
+                    correlation_id=correlation_id,
+                    external_source_id=external_id,
+                    url=url,
+                    _job_id=job_id,
+                )
+            except Exception:  # noqa: BLE001 - summarized without provider text
+                failed.append(external_id)
+            else:
+                enqueued.append(job_id)
+        if failed:
+            raise ThreadFetchQueueError(sorted(failed))
+        return enqueued
     finally:
         await pool.aclose()

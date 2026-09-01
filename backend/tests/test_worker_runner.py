@@ -13,6 +13,7 @@ cache reset); the production runner has no override channel.
 import asyncio
 import inspect
 import json
+import shlex
 import textwrap
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -29,6 +30,15 @@ from sqlalchemy.orm import Session
 from app.auditing.models import AuditEvent
 from app.campaigns.models import Campaign
 from app.config import get_settings
+from app.conversations import service as conversation_service
+from app.conversations.identity import thread_fetch_query_id
+from app.conversations.models import (
+    Conversation,
+    ConversationVersion,
+    ConversationVersionObservation,
+)
+from app.conversations.normalizer import NORMALIZER_VERSION, normalize_reddit_thread
+from app.conversations.runner import run_thread_fetch
 from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
@@ -40,7 +50,7 @@ from app.discovery.runner import (
 )
 from app.discovery.worker import reap_stale_running_runs
 from app.evidence.models import EvidenceBundle
-from app.evidence.store import EvidenceStoreError
+from app.evidence.store import EvidenceStore, EvidenceStoreError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import admin_database_url, configured_database_url
 
@@ -165,6 +175,7 @@ class StubHarness:
         mp.setenv("APTORI_RETRIEVAL_NODE_BIN", str(self.node_bin))
         mp.setenv("APTORI_RETRIEVAL_CLI_PATH", str(self.cli_path))
         mp.setenv("APTORI_DISCOVERY_PROVIDER_CONFIG_PATH", str(self.config_path))
+        mp.setenv("APTORI_THREAD_PROVIDER_CONFIG_PATH", str(self.config_path))
         mp.setenv("APTORI_RETRIEVAL_EVIDENCE_ROOT", str(self.evidence_root))
         mp.setenv("APTORI_RETRIEVAL_STAGING_ROOT", str(self.staging_root))
         mp.setenv("APTORI_RETRIEVAL_INPUT_SCRATCH_ROOT", str(self.input_root))
@@ -582,6 +593,227 @@ def test_worker_publishes_live_progress_after_persisting_observation(
     assert bus.events[1].payload["query_id"] == "q-a"
     assert bus.events[2].payload["status"] == "success"
     assert bus.events[3].payload["status"] == "succeeded"
+
+
+def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transition(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = {
+        "rank": 1,
+        "url": "https://www.reddit.com/r/example/comments/post/example/",
+        "externalSourceId": "t3_post",
+        "subreddit": "example",
+        "title": "Example",
+        "snippet": "Body",
+        "displayedUrl": None,
+    }
+    candidate_url = candidate["url"]
+    assert isinstance(candidate_url, str)
+    discovery_doc = fixture_doc(
+        "q-a", "success", candidateCount=1, candidates=[candidate]
+    )
+    harness.write_doc("q-a", discovery_doc)
+
+    async def fake_enqueue(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        return ["thread-job"]
+
+    monkeypatch.setattr(
+        "app.discovery.queue.enqueue_thread_fetch_candidates", fake_enqueue
+    )
+    run_id = seed_run(worker_db, correlation_id="corr-thread", query_ids=["q-a"])
+    assert invoke(run_id, "q-a", correlation_id="corr-thread") == "succeeded"
+
+    raw_payload = [
+        {
+            "data": {
+                "children": [
+                    {
+                        "kind": "t3",
+                        "data": {
+                            "id": "post",
+                            "name": "t3_post",
+                            "title": "Example",
+                            "author": "op",
+                            "score": 5,
+                            "upvote_ratio": 0.9,
+                            "subreddit_name_prefixed": "r/example",
+                            "num_comments": 1,
+                            "created_utc": 1_700_000_000,
+                            "selftext": "Body",
+                            "permalink": "/r/example/comments/post/example/",
+                            "is_self": True,
+                            "locked": False,
+                        },
+                    }
+                ]
+            }
+        },
+        {
+            "data": {
+                "children": [
+                    {
+                        "kind": "t1",
+                        "data": {
+                            "id": "comment",
+                            "name": "t1_comment",
+                            "author": "person",
+                            "score": 1,
+                            "depth": 0,
+                            "parent_id": "t3_post",
+                            "created_utc": 1_700_000_001,
+                            "body": "Reply",
+                            "replies": "",
+                        },
+                    }
+                ]
+            }
+        },
+    ]
+    projected = normalize_reddit_thread(raw_payload)
+    query_id = thread_fetch_query_id("t3_post")
+    thread_doc: dict[str, object] = {
+        "schemaVersion": 1,
+        "observationId": f"attempt-{query_id}",
+        "capability": "thread_fetch",
+        "providerVariant": "obscura-reddit-thread-test",
+        "configSha256": "b" * 64,
+        "startedAt": "2026-09-01T10:00:00Z",
+        "completedAt": "2026-09-01T10:00:01Z",
+        "elapsedMs": 1000,
+        "status": "success",
+        "failureReason": None,
+        "sourceUrl": candidate_url,
+        "finalUrl": candidate_url,
+        "externalSourceId": "t3_post",
+        "normalizedSha256": projected.normalized_sha256,
+        "normalizedContentSha256": projected.normalized_content_sha256,
+        "network": {"requests": 2},
+        "runtime": {"node": "20.18.0"},
+        "evidenceDirectory": "@@EVIDENCE@@/attempt-@@QID@@",
+        "rawArtifact": {
+            "path": "@@EVIDENCE@@/attempt-@@QID@@/raw-thread-response.json",
+            "filename": "raw-thread-response.json",
+            "bytes": 1,
+            "sha256": "0" * 64,
+        },
+    }
+    harness.write_doc(query_id, thread_doc)
+    raw_json = json.dumps(raw_payload, separators=(",", ":"))
+    harness.use_tail(
+        'DOC="$DOCS/$ID.json"\n'
+        f"printf '%s' {shlex.quote(raw_json)} > \"$ATTEMPT_DIR/raw-thread-response.json\"\n"
+        'sed -e "s|@@EVIDENCE@@|$OUT|g" -e "s|@@QID@@|$ID|g" '
+        '"$DOC" > "$ATTEMPT_DIR/observation.json"\n'
+        'cat "$ATTEMPT_DIR/observation.json"\n'
+        "exit 0\n"
+    )
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+    original_normalize = conversation_service.normalize_observation
+    checked = False
+
+    def assert_committed_then_normalize(
+        session: Session,
+        store: EvidenceStore,
+        workspace_id: uuid.UUID,
+        observation_id: uuid.UUID,
+        *,
+        normalizer_version: str = NORMALIZER_VERSION,
+    ) -> conversation_service.NormalizationRecord:
+        nonlocal checked
+        engine = create_engine(worker_db)
+        try:
+            with Session(engine) as independent:
+                persisted = independent.scalar(
+                    select(RetrievalObservation).where(
+                        RetrievalObservation.discovery_run_id == run_id,
+                        RetrievalObservation.capability == "thread_fetch",
+                    )
+                )
+                assert persisted is not None
+                assert persisted.evidence_state == "bundle"
+                assert persisted.evidence_bundle_id is not None
+                assert (
+                    independent.get(EvidenceBundle, persisted.evidence_bundle_id)
+                    is not None
+                )
+                checked = True
+        finally:
+            engine.dispose()
+        return original_normalize(
+            session,
+            store,
+            workspace_id,
+            observation_id,
+            normalizer_version=normalizer_version,
+        )
+
+    monkeypatch.setattr(
+        conversation_service, "normalize_observation", assert_committed_then_normalize
+    )
+    result = asyncio.run(
+        run_thread_fetch(
+            None,
+            workspace_id=str(DEFAULT_WORKSPACE_ID),
+            run_id=str(run_id),
+            correlation_id="corr-thread",
+            external_source_id="t3_post",
+            url=candidate_url,
+        )
+    )
+
+    assert result == "normalized"
+    assert checked
+    rows = load_rows(worker_db, run_id)
+    assert [row.capability for row in rows] == ["discovery", "thread_fetch"]
+    assert rows[1].status == "success"
+    assert rows[1].evidence_state == "bundle"
+    assert [event.type for event in bus.events] == [
+        "retrieval.observed",
+        "conversation.normalized",
+        "conversation.processing_completed",
+    ]
+    engine = create_engine(worker_db)
+    try:
+        with Session(engine) as session:
+            conversation = session.scalar(
+                select(Conversation).where(
+                    Conversation.canonical_external_discussion_id == "t3_post"
+                )
+            )
+            assert conversation is not None
+            version = session.scalar(
+                select(ConversationVersion).where(
+                    ConversationVersion.conversation_id == conversation.id
+                )
+            )
+            assert version is not None
+            assert version.source_tree_exhausted is True
+            provenance = session.scalar(
+                select(ConversationVersionObservation).where(
+                    ConversationVersionObservation.conversation_version_id == version.id
+                )
+            )
+            assert provenance is not None
+    finally:
+        engine.dispose()
+
+    assert (
+        asyncio.run(
+            run_thread_fetch(
+                None,
+                workspace_id=str(uuid.uuid4()),
+                run_id=str(run_id),
+                correlation_id="corr-thread",
+                external_source_id="t3_post",
+                url=candidate_url,
+            )
+        )
+        == "run_missing"
+    )
 
 
 def test_timeout_without_disk_evidence_classifies_transport_timeout(
@@ -1181,9 +1413,10 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     """The worker runs exactly the deployed configuration: no override channel."""
     from arq.connections import RedisSettings
 
+    from app.conversations.runner import run_thread_fetch
     from app.discovery.worker import WorkerSettings
 
-    assert WorkerSettings.functions == [run_discovery_query]
+    assert WorkerSettings.functions == [run_discovery_query, run_thread_fetch]
     parameters = inspect.signature(run_discovery_query).parameters
     assert list(parameters) == [
         "ctx",

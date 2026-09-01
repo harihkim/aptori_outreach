@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.auditing.service import record_audit
 from app.config import get_settings
+from app.conversations.runner import run_thread_fetch
 from app.db import DatabaseSessionManager
 from app.discovery.models import DiscoveryRun
 from app.discovery.runner import run_discovery_query
@@ -105,7 +106,7 @@ async def reap_stale_running_runs(ctx: object) -> int:
 class WorkerSettings:
     """The single arq entrypoint; see the module docstring for launch."""
 
-    functions = [run_discovery_query]
+    functions = [run_discovery_query, run_thread_fetch]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = _noop_startup
     on_shutdown = _noop_shutdown

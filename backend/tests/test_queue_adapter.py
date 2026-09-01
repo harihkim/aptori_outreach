@@ -17,7 +17,13 @@ import pytest
 from arq.connections import RedisSettings
 
 from app.config import get_settings
-from app.discovery.queue import QueueEnqueueError, enqueue_discovery_queries
+from app.conversations.identity import thread_fetch_query_id
+from app.conversations.runner import run_thread_fetch
+from app.discovery.queue import (
+    QueueEnqueueError,
+    enqueue_discovery_queries,
+    enqueue_thread_fetch_candidates,
+)
 from app.discovery.runner import run_discovery_query
 from app.discovery.worker import WorkerSettings
 
@@ -188,3 +194,48 @@ def test_replay_enqueues_identical_job_ids_again(stub_pool: StubPool) -> None:
     assert first == second
     both_batches = [call["_job_id"] for call in stub_pool.calls]
     assert both_batches == first + first
+
+
+def test_thread_fetch_fanout_deduplicates_candidate_identity(
+    stub_pool: StubPool,
+) -> None:
+    candidates = [
+        {
+            "externalSourceId": "t3_abc",
+            "url": "https://www.reddit.com/r/x/comments/abc/title/",
+        },
+        {
+            "externalSourceId": "t3_abc",
+            "url": "https://www.reddit.com/r/x/comments/abc/duplicate/",
+        },
+        {
+            "externalSourceId": "t3_def",
+            "url": "https://www.reddit.com/r/x/comments/def/title/",
+        },
+        {"title": "invalid candidate"},
+    ]
+
+    job_ids = asyncio.run(
+        enqueue_thread_fetch_candidates(
+            WORKSPACE_ID, RUN_ID, CORRELATION_ID, candidates
+        )
+    )
+
+    expected_queries = [
+        thread_fetch_query_id("t3_abc"),
+        thread_fetch_query_id("t3_def"),
+    ]
+    assert job_ids == [
+        f"thread-fetch:{WORKSPACE_ID}:{RUN_ID}:{query_id}"
+        for query_id in expected_queries
+    ]
+    calls = stub_pool.calls[-2:]
+    assert [call["function"] for call in calls] == [
+        "run_thread_fetch",
+        "run_thread_fetch",
+    ]
+    assert [call["external_source_id"] for call in calls] == ["t3_abc", "t3_def"]
+    runner_params = set(inspect.signature(run_thread_fetch).parameters) - {"ctx"}
+    assert all(
+        set(call) - {"function"} == runner_params | {"_job_id"} for call in calls
+    )

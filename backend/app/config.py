@@ -31,6 +31,13 @@ class Settings(BaseSettings):
         / "provider-configs"
         / "obscura-duckduckgo-lite.json"
     )
+    thread_provider_config_path: Path = (
+        REPO_ROOT
+        / "retrieval-eval"
+        / "prototype-smoke"
+        / "provider-configs"
+        / "obscura-reddit-thread.json"
+    )
     discovery_query_document_path: Path = (
         REPO_ROOT / "retrieval-eval" / "prototype-smoke" / "queries-2026-08.json"
     )
