@@ -133,3 +133,54 @@ async def enqueue_thread_fetch_candidates(
         return enqueued
     finally:
         await pool.aclose()
+
+
+class AnalysisQueueError(RuntimeError):
+    """The analysis job for one Conversation Version was refused by the queue."""
+
+
+async def enqueue_conversation_analysis(
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    conversation_version_id: uuid.UUID,
+    correlation_id: str,
+    *,
+    discovery_run_id: uuid.UUID | None = None,
+) -> str:
+    """Enqueue one idempotent `analyze_conversation` job; returns its job id.
+
+    Identity is f'analysis:{workspace_id}:{campaign_id}:{version_id}', so a
+    replayed normalization re-enqueues the same job rather than a second
+    one, and the worker's own identity check makes even that a no-op.
+    """
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    job_id = f"analysis:{workspace_id}:{campaign_id}:{conversation_version_id}"
+    try:
+        pool = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+    except Exception as error:  # noqa: BLE001 - summarized without provider text
+        raise AnalysisQueueError(
+            f"worker queue unavailable: {type(error).__name__}"
+        ) from None
+    try:
+        await pool.enqueue_job(
+            "run_conversation_analysis",
+            workspace_id=str(workspace_id),
+            campaign_id=str(campaign_id),
+            conversation_id=str(conversation_id),
+            conversation_version_id=str(conversation_version_id),
+            correlation_id=correlation_id,
+            discovery_run_id=(
+                str(discovery_run_id) if discovery_run_id is not None else None
+            ),
+            _job_id=job_id,
+        )
+    except Exception as error:  # noqa: BLE001 - summarized without provider text
+        raise AnalysisQueueError(
+            f"worker queue refused analysis job: {type(error).__name__}"
+        ) from None
+    finally:
+        await pool.aclose()
+    return job_id
