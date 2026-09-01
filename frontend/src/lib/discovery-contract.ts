@@ -101,6 +101,17 @@ export type DiscoveryRun = {
 	updatedAt: string;
 };
 
+export type BundleEvidenceBody = {
+	state: 'bundle';
+	bundle_id: string;
+	bundle_sha256: string;
+	artifact_count: number;
+};
+
+export type LegacyEvidenceBody = { state: 'legacy' };
+export type NoEvidenceBody = { state: 'none' };
+export type EvidenceBody = BundleEvidenceBody | LegacyEvidenceBody | NoEvidenceBody;
+
 export type ObservationBody = {
 	id: string;
 	query_id: string;
@@ -115,7 +126,7 @@ export type ObservationBody = {
 	candidates: unknown[];
 	normalized_sha256: string | null;
 	elapsed_ms: number | null;
-	evidence_directory: string;
+	evidence: EvidenceBody;
 	correlation_id: string;
 	started_at: string | null;
 	completed_at: string | null;
@@ -126,6 +137,15 @@ export type ValidatedObservationBody = Omit<ObservationBody, 'status' | 'failure
 	status: ObservationStatus;
 	failure_class: FailureClass | null;
 };
+
+export type BundleEvidence = {
+	state: 'bundle';
+	bundleId: string;
+	bundleSha256: string;
+	artifactCount: number;
+};
+
+export type Evidence = BundleEvidence | LegacyEvidenceBody | NoEvidenceBody;
 
 export type Observation = {
 	id: string;
@@ -141,7 +161,7 @@ export type Observation = {
 	candidates: unknown[];
 	normalizedSha256: string | null;
 	elapsedMs: number | null;
-	evidenceDirectory: string;
+	evidence: Evidence;
 	correlationId: string;
 	startedAt: string | null;
 	completedAt: string | null;

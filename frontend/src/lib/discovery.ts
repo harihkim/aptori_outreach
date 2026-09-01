@@ -6,6 +6,8 @@ import {
 	isStringList,
 	isTimestampOrNull,
 	type DiscoveryRun,
+	type Evidence,
+	type EvidenceBody,
 	type MethodPlanBody,
 	type Observation,
 	type ObservationsState,
@@ -81,6 +83,31 @@ function isRunBody(value: unknown): value is ValidatedRunBody {
 	);
 }
 
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+	const actual = Object.keys(value).sort();
+	const expected = [...keys].sort();
+	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isEvidenceBody(value: unknown): value is EvidenceBody {
+	if (!isRecord(value) || typeof value.state !== 'string') {
+		return false;
+	}
+	if (value.state === 'legacy' || value.state === 'none') {
+		return hasExactKeys(value, ['state']);
+	}
+	return (
+		value.state === 'bundle' &&
+		hasExactKeys(value, ['state', 'bundle_id', 'bundle_sha256', 'artifact_count']) &&
+		typeof value.bundle_id === 'string' &&
+		typeof value.bundle_sha256 === 'string' &&
+		/^[0-9a-f]{64}$/.test(value.bundle_sha256) &&
+		typeof value.artifact_count === 'number' &&
+		Number.isInteger(value.artifact_count) &&
+		value.artifact_count >= 1
+	);
+}
+
 function isObservationBody(value: unknown): value is ValidatedObservationBody {
 	if (!isRecord(value)) {
 		return false;
@@ -101,12 +128,24 @@ function isObservationBody(value: unknown): value is ValidatedObservationBody {
 		Array.isArray(value.candidates) &&
 		(value.normalized_sha256 === null || typeof value.normalized_sha256 === 'string') &&
 		(value.elapsed_ms === null || typeof value.elapsed_ms === 'number') &&
-		typeof value.evidence_directory === 'string' &&
+		isEvidenceBody(value.evidence) &&
 		typeof value.correlation_id === 'string' &&
 		isTimestampOrNull(value.started_at) &&
 		isTimestampOrNull(value.completed_at) &&
 		typeof value.created_at === 'string'
 	);
+}
+
+function toEvidence(evidence: EvidenceBody): Evidence {
+	if (evidence.state !== 'bundle') {
+		return evidence;
+	}
+	return {
+		state: 'bundle',
+		bundleId: evidence.bundle_id,
+		bundleSha256: evidence.bundle_sha256,
+		artifactCount: evidence.artifact_count
+	};
 }
 
 function toRun(entry: ValidatedRunBody): DiscoveryRun {
@@ -151,7 +190,7 @@ function toObservation(entry: ValidatedObservationBody): Observation {
 		candidates: entry.candidates,
 		normalizedSha256: entry.normalized_sha256,
 		elapsedMs: entry.elapsed_ms,
-		evidenceDirectory: entry.evidence_directory,
+		evidence: toEvidence(entry.evidence),
 		correlationId: entry.correlation_id,
 		startedAt: entry.started_at,
 		completedAt: entry.completed_at,

@@ -77,7 +77,12 @@ const observationBody = {
 	candidates: [{ title: 't' }],
 	normalized_sha256: 'a'.repeat(64),
 	elapsed_ms: 1250,
-	evidence_directory: '/evidence-runs/run/attempt-1',
+	evidence: {
+		state: 'bundle',
+		bundle_id: '6a9a2f0e-4444-4bbb-8ccc-000000000004',
+		bundle_sha256: 'b'.repeat(64),
+		artifact_count: 1
+	},
 	correlation_id: 'corr1234567890ab',
 	started_at: '2026-08-23T10:00:00Z',
 	completed_at: '2026-08-23T10:00:01Z',
@@ -221,7 +226,12 @@ describe('parseObservationsResponse', () => {
 		expect(first.candidates).toEqual([{ title: 't' }]);
 		expect(first.elapsedMs).toBe(1250);
 		expect(first.failureClass).toBeNull();
-		expect(first.evidenceDirectory).toBe('/evidence-runs/run/attempt-1');
+		expect(first.evidence).toEqual({
+			state: 'bundle',
+			bundleId: '6a9a2f0e-4444-4bbb-8ccc-000000000004',
+			bundleSha256: 'b'.repeat(64),
+			artifactCount: 1
+		});
 		expect(state.items[1].status).toBe('runtime_verification_failed');
 	});
 
@@ -235,6 +245,32 @@ describe('parseObservationsResponse', () => {
 		});
 		expect(state.items).toEqual([]);
 		expect(state.detail).toBe('Unexpected response (HTTP 200)');
+	});
+
+	it('accepts the closed legacy and none evidence variants', () => {
+		for (const evidence of [{ state: 'legacy' }, { state: 'none' }]) {
+			const state = parseObservationsResponse({
+				httpStatus: 200,
+				body: { items: [{ ...observationBody, evidence }], next_cursor: null }
+			});
+			expect(state.detail).toBeNull();
+			expect(state.items[0].evidence).toEqual(evidence);
+		}
+	});
+
+	it('rejects legacy filesystem paths and open evidence variants', () => {
+		for (const item of [
+			{ ...observationBody, evidence: undefined, evidence_directory: '/tmp/evidence' },
+			{ ...observationBody, evidence: { state: 'legacy', storage_key: 'secret/path' } },
+			{ ...observationBody, evidence: { state: 'bundle', bundle_id: 'id', bundle_sha256: 'bad', artifact_count: 0 } }
+		]) {
+			const state = parseObservationsResponse({
+				httpStatus: 200,
+				body: { items: [item], next_cursor: null }
+			});
+			expect(state.items).toEqual([]);
+			expect(state.detail).toContain('Unexpected response');
+		}
 	});
 
 	it('maps every legal failure class and keeps null valid for native statuses', () => {

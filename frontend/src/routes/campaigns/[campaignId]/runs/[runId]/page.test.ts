@@ -69,7 +69,7 @@ function observation(status: string, failureClass: string | null = null, queryId
 		candidates: [],
 		normalized_sha256: null,
 		elapsed_ms: 1250,
-		evidence_directory: `/evidence-runs/run/attempt-${queryId}`,
+		evidence: { state: 'legacy' },
 		correlation_id: 'corr1234567890ab',
 		started_at: '2026-08-23T10:00:00Z',
 		completed_at: '2026-08-23T10:00:01Z',
