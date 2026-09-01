@@ -203,23 +203,34 @@ def insert_observation(
     evidence_bundle_id: uuid.UUID | None = None,
     failure_class: str | None = None,
     failure_reason: str | None = None,
-) -> None:
+    capability: str = "discovery",
+    external_source_id: str | None = None,
+    source_url: str | None = None,
+    candidates: list[dict[str, object]] | None = None,
+) -> uuid.UUID:
     from app.discovery.models import RetrievalObservation
 
+    observation_id = uuid.uuid4()
+    candidate_rows = candidates or []
     engine = create_engine(engine_url)
     try:
         with Session(engine) as session:
             session.add(
                 RetrievalObservation(
+                    id=observation_id,
                     discovery_run_id=uuid.UUID(run_id),
                     workspace_id=DEFAULT_WORKSPACE_ID,
                     query_id=qid,
                     schema_version=1,
-                    capability="discovery",
+                    capability=capability,
                     provider_variant="obscura-duckduckgo-lite@2026-08-21",
                     config_sha256="0" * 64,
                     observation_id=f"attempt-{qid}",
                     status=status,
+                    external_source_id=external_source_id,
+                    source_url=source_url,
+                    candidate_count=len(candidate_rows),
+                    candidates=candidate_rows,
                     evidence_state=evidence_state,
                     evidence_bundle_id=evidence_bundle_id,
                     evidence_directory=(
@@ -235,6 +246,7 @@ def insert_observation(
             session.commit()
     finally:
         engine.dispose()
+    return observation_id
 
 
 def started_run(
@@ -664,6 +676,120 @@ def test_observations_page_walks_creation_order_with_cursor(
     }
     assert item["failure_class"] is None
     assert item["evidence"] == {"state": "legacy"}
+
+
+def test_conversation_transitions_are_workspace_scoped_and_path_free(
+    api: TestClient, fake_enqueue: FakeEnqueue, discovery_database_url: str
+) -> None:
+    from app.conversations.models import (
+        Conversation,
+        ConversationVersion,
+        ConversationVersionObservation,
+    )
+
+    body, _campaign_id = started_run(api, fake_enqueue)
+    run_id = body["id"]
+    external_id = f"t3_{uuid.uuid4().hex}"
+    source_url = f"https://www.reddit.com/r/example/comments/{external_id[3:]}/topic/"
+    candidate: dict[str, object] = {
+        "externalSourceId": external_id,
+        "url": source_url,
+        "title": "Tenant-safe retrieval boundary",
+        "rank": 1,
+    }
+    insert_observation(
+        discovery_database_url,
+        run_id,
+        f"discovery-{uuid.uuid4().hex}",
+        "success",
+        candidates=[candidate],
+    )
+    thread_observation_id = insert_observation(
+        discovery_database_url,
+        run_id,
+        f"thread-{uuid.uuid4().hex}",
+        "success",
+        capability="thread_fetch",
+        external_source_id=external_id,
+        source_url=source_url,
+    )
+
+    engine = create_engine(discovery_database_url)
+    conversation_id = uuid.uuid4()
+    version_id = uuid.uuid4()
+    try:
+        with Session(engine) as session, session.begin():
+            session.add(
+                Conversation(
+                    id=conversation_id,
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    source_platform="reddit",
+                    canonical_external_discussion_id=external_id,
+                )
+            )
+            session.flush()
+            session.add(
+                ConversationVersion(
+                    id=version_id,
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    conversation_id=conversation_id,
+                    normalizer_version="reddit-thread/v1",
+                    normalized_sha256="a" * 64,
+                    normalized_content_sha256="b" * 64,
+                    normalized_content={"kind": "thread"},
+                    source_tree_exhausted=True,
+                )
+            )
+            session.flush()
+            session.add(
+                ConversationVersionObservation(
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                    conversation_version_id=version_id,
+                    retrieval_observation_id=thread_observation_id,
+                )
+            )
+    finally:
+        engine.dispose()
+
+    response = api.get(f"/discovery-runs/{run_id}/conversations")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "external_source_id": external_id,
+                "url": source_url,
+                "title": "Tenant-safe retrieval boundary",
+                "rank": 1,
+                "state": "conversation",
+                "retrieval_status": "success",
+                "conversation": {
+                    "id": str(conversation_id),
+                    "source_platform": "reddit",
+                    "canonical_external_discussion_id": external_id,
+                    "current_version": {
+                        "id": str(version_id),
+                        "normalizer_version": "reddit-thread/v1",
+                        "normalized_sha256": "a" * 64,
+                        "normalized_content_sha256": "b" * 64,
+                        "source_tree_exhausted": True,
+                        "created_at": response.json()["items"][0]["conversation"][
+                            "current_version"
+                        ]["created_at"],
+                    },
+                },
+            }
+        ],
+        "expected_count": 1,
+        "fetched_count": 1,
+        "normalized_count": 1,
+        "processing_complete": False,
+    }
+    assert "/tmp/" not in response.text
+    assert "storage_key" not in response.text
+
+    missing = api.get(f"/discovery-runs/{uuid.uuid4()}/conversations")
+    assert missing.status_code == 404
 
 
 def test_observations_serialize_all_evidence_states_without_storage_leakage(

@@ -182,6 +182,42 @@ export type ObservationsState = {
 	detail: string | null;
 };
 
+export type ConversationVersionSummary = {
+	id: string;
+	normalizerVersion: string;
+	normalizedSha256: string;
+	normalizedContentSha256: string;
+	sourceTreeExhausted: boolean;
+	createdAt: string;
+};
+
+export type ConversationSummary = {
+	id: string;
+	sourcePlatform: string;
+	canonicalExternalDiscussionId: string;
+	currentVersion: ConversationVersionSummary;
+};
+
+export type CandidateConversationTransition = {
+	externalSourceId: string;
+	url: string;
+	title: string;
+	rank: number | null;
+	state: 'candidate' | 'conversation';
+	retrievalStatus: string | null;
+	conversation: ConversationSummary | null;
+};
+
+export type ConversationsState = {
+	apiReachable: boolean;
+	items: CandidateConversationTransition[];
+	expectedCount: number;
+	fetchedCount: number;
+	normalizedCount: number;
+	processingComplete: boolean;
+	detail: string | null;
+};
+
 export function isRunStatus(value: string): value is RunStatus {
 	return (RUN_STATUSES as readonly string[]).includes(value);
 }

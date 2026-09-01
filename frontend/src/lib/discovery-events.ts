@@ -11,6 +11,7 @@ export const DISCOVERY_EVENT_TYPES = [
 	'retrieval.observed',
 	'discovery.completed',
 	'conversation.normalized',
+	'conversation.processing_completed',
 	'analysis.completed',
 	'draft.version_created',
 	'approval.created',

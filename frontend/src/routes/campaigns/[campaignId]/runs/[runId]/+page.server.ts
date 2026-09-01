@@ -2,6 +2,7 @@ import type { PageServerLoad } from './$types';
 
 import {
 	parseDiscoveryRunResponse,
+	parseConversationsResponse,
 	parseObservationsResponse
 } from '$lib/discovery';
 import { callApi } from '$lib/server/api';
@@ -32,6 +33,15 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 				nextCursor: null,
 				detail: 'Discovery run not found.'
 			},
+			conversationsState: {
+				apiReachable: false,
+				items: [],
+				expectedCount: 0,
+				fetchedCount: 0,
+				normalizedCount: 0,
+				processingComplete: false,
+				detail: 'Discovery run not found.'
+			},
 			params: { campaignId: params.campaignId, runId: params.runId }
 		};
 	}
@@ -47,10 +57,22 @@ export const load: PageServerLoad = async ({ fetch, depends, params }) => {
 		httpStatus: observationsResult.status ?? null,
 		body: observationsResult.body
 	});
+	const conversationsResult = await callApi(
+		fetch,
+		'GET',
+		`/discovery-runs/${params.runId}/conversations`,
+		null,
+		{ timeoutMs: 3000 }
+	);
+	const conversationsState = parseConversationsResponse({
+		httpStatus: conversationsResult.status ?? null,
+		body: conversationsResult.body
+	});
 
 	return {
 		runState,
 		observationsState,
+		conversationsState,
 		params: { campaignId: params.campaignId, runId: params.runId }
 	};
 };

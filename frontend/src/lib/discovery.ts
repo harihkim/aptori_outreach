@@ -11,6 +11,8 @@ import {
 	type MethodPlanBody,
 	type Observation,
 	type ObservationsState,
+	type CandidateConversationTransition,
+	type ConversationsState,
 	type PlanQueryBody,
 	type RunState,
 	type ValidatedObservationBody,
@@ -87,6 +89,18 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 	const actual = Object.keys(value).sort();
 	const expected = [...keys].sort();
 	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isHttpUrl(value: unknown): value is string {
+	if (typeof value !== 'string') {
+		return false;
+	}
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+	} catch {
+		return false;
+	}
 }
 
 function isEvidenceBody(value: unknown): value is EvidenceBody {
@@ -279,6 +293,115 @@ export function parseObservationsResponse({
 	}
 
 	return { apiReachable: true, items, nextCursor, detail: null };
+}
+
+/** Derive Candidate-to-Conversation state from the path-free backend response. */
+export function parseConversationsResponse({
+	httpStatus,
+	body
+}: {
+	httpStatus: number | null;
+	body: unknown;
+}): ConversationsState {
+	const unavailable: ConversationsState = {
+		apiReachable: false,
+		items: [],
+		expectedCount: 0,
+		fetchedCount: 0,
+		normalizedCount: 0,
+		processingComplete: false,
+		detail: 'Backend did not answer'
+	};
+	if (httpStatus === null || httpStatus === 0) {
+		return unavailable;
+	}
+	const unexpected: ConversationsState = {
+		...unavailable,
+		apiReachable: true,
+		detail: `Unexpected response (HTTP ${httpStatus})`
+	};
+	if (httpStatus !== 200) {
+		return { ...unexpected, detail: explainDiscoveryError(httpStatus, body) };
+	}
+	if (
+		!isRecord(body) ||
+		!Array.isArray(body.items) ||
+		typeof body.expected_count !== 'number' ||
+		typeof body.fetched_count !== 'number' ||
+		typeof body.normalized_count !== 'number' ||
+		typeof body.processing_complete !== 'boolean'
+	) {
+		return unexpected;
+	}
+	const items: CandidateConversationTransition[] = [];
+	for (const raw of body.items) {
+		if (
+			!isRecord(raw) ||
+			typeof raw.external_source_id !== 'string' ||
+				!isHttpUrl(raw.url) ||
+			typeof raw.title !== 'string' ||
+			!(raw.rank === null || typeof raw.rank === 'number') ||
+			!(raw.state === 'candidate' || raw.state === 'conversation') ||
+			!(raw.retrieval_status === null || typeof raw.retrieval_status === 'string')
+		) {
+			return unexpected;
+		}
+		let conversation: CandidateConversationTransition['conversation'] = null;
+		if (raw.conversation !== null) {
+			if (!isRecord(raw.conversation) || !isRecord(raw.conversation.current_version)) {
+				return unexpected;
+			}
+			const current = raw.conversation.current_version;
+			if (
+				typeof raw.conversation.id !== 'string' ||
+				typeof raw.conversation.source_platform !== 'string' ||
+				typeof raw.conversation.canonical_external_discussion_id !== 'string' ||
+				typeof current.id !== 'string' ||
+				typeof current.normalizer_version !== 'string' ||
+				typeof current.normalized_sha256 !== 'string' ||
+				typeof current.normalized_content_sha256 !== 'string' ||
+				typeof current.source_tree_exhausted !== 'boolean' ||
+				typeof current.created_at !== 'string'
+			) {
+				return unexpected;
+			}
+			conversation = {
+				id: raw.conversation.id,
+				sourcePlatform: raw.conversation.source_platform,
+				canonicalExternalDiscussionId:
+					raw.conversation.canonical_external_discussion_id,
+				currentVersion: {
+					id: current.id,
+					normalizerVersion: current.normalizer_version,
+					normalizedSha256: current.normalized_sha256,
+					normalizedContentSha256: current.normalized_content_sha256,
+					sourceTreeExhausted: current.source_tree_exhausted,
+					createdAt: current.created_at
+				}
+			};
+		}
+		if ((raw.state === 'conversation') !== (conversation !== null)) {
+			return unexpected;
+		}
+		items.push({
+			externalSourceId: raw.external_source_id,
+			url: raw.url,
+			title: raw.title,
+			rank: raw.rank,
+			state: raw.state,
+			retrievalStatus: raw.retrieval_status,
+			conversation
+		});
+	}
+	return {
+		apiReachable: true,
+		items,
+		expectedCount: body.expected_count,
+		fetchedCount: body.fetched_count,
+		normalizedCount: body.normalized_count,
+		processingComplete: body.processing_complete,
+		detail: null
+	};
 }
 
 /** Submission id for the start-discovery action of one campaign. */

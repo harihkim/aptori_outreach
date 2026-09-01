@@ -11,9 +11,17 @@ from fastapi import APIRouter, Header, HTTPException, Path, Query, Request, stat
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from pydantic import AnyHttpUrl
 
 from app.auth import Principal
 from app.config import get_settings
+from app.conversations import service as conversation_service
+from app.conversations.schemas import (
+    CandidateConversationTransitionResponse,
+    ConversationSummary,
+    ConversationVersionSummary,
+    RunConversationTransitionsResponse,
+)
 from app.deps import PrincipalDep, SessionDep, WorkspaceDep
 from app.discovery import events as progress_events
 from app.discovery import queue, service
@@ -50,6 +58,7 @@ class _DiscoveryRunSnapshot:
     correlation_id: str
     status: str
     metrics: dict[str, object] | None
+    conversation_processing_complete: bool
 
 
 _AUTH_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -140,7 +149,9 @@ def get_discovery_run(
     return DiscoveryRunResponse.model_validate(run)
 
 
-def _snapshot_run(run: DiscoveryRun) -> _DiscoveryRunSnapshot:
+def _snapshot_run(
+    run: DiscoveryRun, *, conversation_processing_complete: bool
+) -> _DiscoveryRunSnapshot:
     """Copy only the run fields needed by the long-lived event stream."""
     return _DiscoveryRunSnapshot(
         id=run.id,
@@ -148,6 +159,7 @@ def _snapshot_run(run: DiscoveryRun) -> _DiscoveryRunSnapshot:
         correlation_id=run.correlation_id,
         status=run.status,
         metrics=deepcopy(run.metrics),
+        conversation_processing_complete=conversation_processing_complete,
     )
 
 
@@ -156,8 +168,13 @@ def _load_run_snapshot(
 ) -> _DiscoveryRunSnapshot:
     """Read one detached snapshot in an owned, short-lived session."""
     with request.app.state.database.session_factory() as session:
+        run = service.get_discovery_run(session, principal, workspace_id, run_id)
+        transitions = conversation_service.list_run_transitions(
+            session, workspace_id, run_id
+        )
         return _snapshot_run(
-            service.get_discovery_run(session, principal, workspace_id, run_id)
+            run,
+            conversation_processing_complete=transitions.processing_complete,
         )
 
 
@@ -210,8 +227,10 @@ async def stream_discovery_events(
             correlation_id=run.correlation_id,
             payload={"status": run.status, "metrics": run.metrics},
         ).as_sse()
-        return
+        if run.conversation_processing_complete:
+            return
 
+    completion_sent = run.status in TERMINAL_RUN_STATUSES
     try:
         async for event in progress_events.get_event_bus().subscribe(
             workspace_id, run.id
@@ -224,7 +243,7 @@ async def stream_discovery_events(
                 latest = await run_in_threadpool(
                     _load_run_snapshot, request, principal, workspace_id, run.id
                 )
-                if latest.status in TERMINAL_RUN_STATUSES:
+                if latest.status in TERMINAL_RUN_STATUSES and not completion_sent:
                     yield ProgressEvent.create(
                         event_type="discovery.completed",
                         run_id=latest.id,
@@ -232,6 +251,11 @@ async def stream_discovery_events(
                         correlation_id=latest.correlation_id,
                         payload={"status": latest.status, "metrics": latest.metrics},
                     ).as_sse()
+                    completion_sent = True
+                    if latest.conversation_processing_complete:
+                        break
+                    continue
+                if latest.conversation_processing_complete:
                     break
                 yield ServerSentEvent(comment="keepalive")
                 continue
@@ -245,6 +269,13 @@ async def stream_discovery_events(
                 continue
             yield event.as_sse()
             if event.type == "discovery.completed":
+                completion_sent = True
+                latest = await run_in_threadpool(
+                    _load_run_snapshot, request, principal, workspace_id, run.id
+                )
+                if latest.conversation_processing_complete:
+                    break
+            if event.type == "conversation.processing_completed":
                 break
     except Exception:  # noqa: BLE001 - stream failure activates frontend fallback
         logger.warning("discovery progress stream unavailable", exc_info=True)
@@ -286,6 +317,62 @@ def list_run_observations(
             for record in observations
         ],
         next_cursor=next_cursor,
+    )
+
+
+@router.get(
+    "/discovery-runs/{run_id}/conversations",
+    response_model=RunConversationTransitionsResponse,
+    responses={
+        **_AUTH_RESPONSES,
+        404: {"model": ErrorResponse, "description": "Discovery run not found."},
+    },
+)
+def list_run_conversations(
+    run_id: Annotated[UUID, Path()],
+    session: SessionDep,
+    workspace: WorkspaceDep,
+    principal: PrincipalDep,
+) -> RunConversationTransitionsResponse:
+    try:
+        service.get_discovery_run(session, principal, workspace.id, run_id)
+        transitions = conversation_service.list_run_transitions(
+            session, workspace.id, run_id
+        )
+    except (service.DiscoveryRunNotFound, LookupError):
+        raise _run_not_found() from None
+
+    items: list[CandidateConversationTransitionResponse] = []
+    for item in transitions.items:
+        summary: ConversationSummary | None = None
+        if item.conversation is not None and item.current_version is not None:
+            summary = ConversationSummary(
+                id=item.conversation.id,
+                source_platform=item.conversation.source_platform,
+                canonical_external_discussion_id=(
+                    item.conversation.canonical_external_discussion_id
+                ),
+                current_version=ConversationVersionSummary.model_validate(
+                    item.current_version
+                ),
+            )
+        items.append(
+            CandidateConversationTransitionResponse(
+                external_source_id=item.external_source_id,
+                url=AnyHttpUrl(item.url),
+                title=item.title,
+                rank=item.rank,
+                state="conversation" if summary is not None else "candidate",
+                retrieval_status=item.retrieval_status,
+                conversation=summary,
+            )
+        )
+    return RunConversationTransitionsResponse(
+        items=items,
+        expected_count=transitions.expected_count,
+        fetched_count=transitions.fetched_count,
+        normalized_count=transitions.normalized_count,
+        processing_complete=transitions.processing_complete,
     )
 
 

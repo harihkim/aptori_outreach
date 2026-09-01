@@ -89,6 +89,21 @@ describe('discovery run page load', () => {
 					status: 200,
 					headers: { 'content-type': 'application/json' }
 				})
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						items: [],
+						expected_count: 0,
+						fetched_count: 0,
+						normalized_count: 0,
+						processing_complete: false
+					}),
+					{
+						status: 200,
+						headers: { 'content-type': 'application/json' }
+					}
+				)
 			);
 
 		const result = await load({
@@ -101,6 +116,6 @@ describe('discovery run page load', () => {
 
 		expect(result.runState.run).not.toBeNull();
 		expect(result.observationsState.items).toEqual([]);
-		expect(requestFetch).toHaveBeenCalledTimes(2);
+		expect(requestFetch).toHaveBeenCalledTimes(3);
 	});
 });

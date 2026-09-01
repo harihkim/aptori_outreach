@@ -12,6 +12,7 @@ import {
 	explainDiscoveryError,
 	latencyLabel,
 	observationTone,
+	parseConversationsResponse,
 	parseDiscoveryRunResponse,
 	parseObservationsResponse,
 	runStatusTone,
@@ -315,6 +316,91 @@ describe('parseObservationsResponse', () => {
 		});
 		expect(state.apiReachable).toBe(true);
 		expect(state.detail).toBe('Discovery run not found.');
+	});
+});
+
+describe('parseConversationsResponse', () => {
+	const candidate = {
+		external_source_id: 't3_example',
+		url: 'https://www.reddit.com/r/example/comments/example/topic/',
+		title: 'A useful discussion',
+		rank: 1,
+		state: 'candidate',
+		retrieval_status: null,
+		conversation: null
+	};
+	const conversation = {
+		...candidate,
+		state: 'conversation',
+		retrieval_status: 'success',
+		conversation: {
+			id: 'conversation-1',
+			source_platform: 'reddit',
+			canonical_external_discussion_id: 't3_example',
+			current_version: {
+				id: 'version-1',
+				normalizer_version: 'reddit-thread/v1',
+				normalized_sha256: 'a'.repeat(64),
+				normalized_content_sha256: 'b'.repeat(64),
+				source_tree_exhausted: true,
+				created_at: '2026-09-01T12:00:00Z'
+			}
+		}
+	};
+
+	it('maps Candidate to Conversation transitions without storage metadata', () => {
+		const state = parseConversationsResponse({
+			httpStatus: 200,
+			body: {
+				items: [candidate, conversation],
+				expected_count: 2,
+				fetched_count: 1,
+				normalized_count: 1,
+				processing_complete: false
+			}
+		});
+
+		expect(state.detail).toBeNull();
+		expect(state.expectedCount).toBe(2);
+		expect(state.items[0].state).toBe('candidate');
+		expect(state.items[1].conversation?.currentVersion).toEqual({
+			id: 'version-1',
+			normalizerVersion: 'reddit-thread/v1',
+			normalizedSha256: 'a'.repeat(64),
+			normalizedContentSha256: 'b'.repeat(64),
+			sourceTreeExhausted: true,
+			createdAt: '2026-09-01T12:00:00Z'
+		});
+	});
+
+	it('rejects mismatched states and malformed counters', () => {
+		for (const body of [
+			{
+				items: [{ ...candidate, state: 'conversation' }],
+				expected_count: 1,
+				fetched_count: 0,
+				normalized_count: 0,
+				processing_complete: false
+			},
+			{
+				items: [],
+				expected_count: 'one',
+				fetched_count: 0,
+				normalized_count: 0,
+				processing_complete: true
+			},
+			{
+				items: [{ ...candidate, url: 'javascript:alert(1)' }],
+				expected_count: 1,
+				fetched_count: 0,
+				normalized_count: 0,
+				processing_complete: false
+			}
+		]) {
+			const state = parseConversationsResponse({ httpStatus: 200, body });
+			expect(state.items).toEqual([]);
+			expect(state.detail).toBe('Unexpected response (HTTP 200)');
+		}
 	});
 });
 

@@ -10,6 +10,7 @@ import { invalidate } from '$app/navigation';
 import Page from './+page.svelte';
 import {
 	parseDiscoveryRunResponse,
+	parseConversationsResponse,
 	parseObservationsResponse,
 	type DiscoveryRunBody
 } from '$lib/discovery';
@@ -124,16 +125,28 @@ class FakeEventSource {
 function pageData(
 	runBodyValue: DiscoveryRunBody,
 	items: unknown[] = [],
-	nextCursor: string | null = null
+	nextCursor: string | null = null,
+	conversationsBody: unknown = {
+		items: [],
+		expected_count: 0,
+		fetched_count: 0,
+		normalized_count: 0,
+		processing_complete: true
+	}
 ) {
 	const runState = parseDiscoveryRunResponse({ httpStatus: 200, body: runBodyValue });
 	const observationsState = parseObservationsResponse({
 		httpStatus: 200,
 		body: { items, next_cursor: nextCursor }
 	});
+	const conversationsState = parseConversationsResponse({
+		httpStatus: 200,
+		body: conversationsBody
+	});
 	return {
 		runState,
 		observationsState,
+		conversationsState,
 		params: {
 			campaignId: runBodyValue.campaign_id,
 			runId: runBodyValue.id
@@ -144,12 +157,22 @@ function pageData(
 /** A transient outage after a previously successful poll of a live run. */
 function unreachablePageData(runBodyValue: DiscoveryRunBody) {
 	const { run } = parseDiscoveryRunResponse({ httpStatus: 200, body: runBodyValue });
+	const terminal = ['succeeded', 'partial', 'failed', 'cancelled'].includes(runBodyValue.status);
 	return {
 		runState: { apiReachable: false, run, detail: 'Backend did not answer' },
 		observationsState: {
 			apiReachable: false,
 			items: [],
 			nextCursor: null,
+			detail: 'Backend did not answer'
+		},
+		conversationsState: {
+			apiReachable: false,
+			items: [],
+			expectedCount: 0,
+			fetchedCount: 0,
+			normalizedCount: 0,
+			processingComplete: terminal,
 			detail: 'Backend did not answer'
 		},
 		params: {
@@ -197,6 +220,49 @@ describe('discovery run page', () => {
 			})
 		);
 		expect(invalidate).toHaveBeenCalledWith('app:discovery-run');
+	});
+
+	it('keeps a terminal discovery stream open until conversation processing completes', () => {
+		vi.stubGlobal('EventSource', FakeEventSource);
+		FakeEventSource.instances = [];
+		render(Page, {
+			data: pageData(runBody({ status: 'succeeded' }), [], null, {
+				items: [],
+				expected_count: 1,
+				fetched_count: 0,
+				normalized_count: 0,
+				processing_complete: false
+			})
+		});
+		const source = FakeEventSource.instances[0];
+
+		source.emit(
+			'discovery.completed',
+			JSON.stringify({
+				id: 'event-complete-discovery',
+				type: 'discovery.completed',
+				run_id: '6a9a2f0e-2222-4bbb-8ccc-000000000002',
+				workspace_id: '00000000-0000-0000-0000-000000000001',
+				correlation_id: 'corr1234567890ab',
+				occurred_at: '2026-09-01T12:00:00Z',
+				payload: { status: 'succeeded' }
+			})
+		);
+		expect(source.closed).toBe(false);
+
+		source.emit(
+			'conversation.processing_completed',
+			JSON.stringify({
+				id: 'event-complete-conversations',
+				type: 'conversation.processing_completed',
+				run_id: '6a9a2f0e-2222-4bbb-8ccc-000000000002',
+				workspace_id: '00000000-0000-0000-0000-000000000001',
+				correlation_id: 'corr1234567890ab',
+				occurred_at: '2026-09-01T12:00:01Z',
+				payload: { expected_count: 1, fetched_count: 1, normalized_count: 1 }
+			})
+		);
+		expect(source.closed).toBe(true);
 	});
 
 	it('closes a failed stream and leaves the polling fallback active', async () => {
@@ -284,6 +350,57 @@ describe('discovery run page', () => {
 		expect(summary).toBeInTheDocument();
 		expect(screen.getByText('API security')).toBeInTheDocument();
 		expect(screen.getByText('application security tools')).toBeInTheDocument();
+	});
+
+	it('shows each durable Candidate to Conversation transition', () => {
+		render(Page, {
+			data: pageData(runBody({ status: 'succeeded' }), [], null, {
+				items: [
+					{
+						external_source_id: 't3_waiting',
+						url: 'https://www.reddit.com/r/example/comments/waiting/topic/',
+						title: 'Waiting for retrieval',
+						rank: 1,
+						state: 'candidate',
+						retrieval_status: null,
+						conversation: null
+					},
+					{
+						external_source_id: 't3_ready',
+						url: 'https://www.reddit.com/r/example/comments/ready/topic/',
+						title: 'Normalized discussion',
+						rank: 2,
+						state: 'conversation',
+						retrieval_status: 'success',
+						conversation: {
+							id: 'conversation-ready',
+							source_platform: 'reddit',
+							canonical_external_discussion_id: 't3_ready',
+							current_version: {
+								id: 'version-ready',
+								normalizer_version: 'reddit-thread/v1',
+								normalized_sha256: 'a'.repeat(64),
+								normalized_content_sha256: 'b'.repeat(64),
+								source_tree_exhausted: true,
+								created_at: '2026-09-01T12:00:00Z'
+							}
+						}
+					}
+				],
+				expected_count: 2,
+				fetched_count: 1,
+				normalized_count: 1,
+				processing_complete: false
+			})
+		});
+
+		const list = screen.getByTestId('candidate-conversation-list');
+		expect(within(list).getByText('Waiting for retrieval')).toBeInTheDocument();
+		expect(within(list).getByText('Normalized discussion')).toBeInTheDocument();
+		expect(within(list).getByText('Candidate')).toBeInTheDocument();
+		expect(within(list).getByText('Conversation')).toBeInTheDocument();
+		expect(within(list).getByText(/reddit-thread\/v1/)).toBeInTheDocument();
+		expect(within(list).getByText(/complete tree/)).toBeInTheDocument();
 	});
 
 	it('teaches the operator while waiting for the first observation', () => {
