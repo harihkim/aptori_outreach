@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 from app.auditing.models import AuditEvent
 from app.auditing.service import record_audit
 from app.campaigns.models import Campaign
+from app.conversations.models import (
+    Conversation,
+    ConversationVersion,
+    ConversationVersionObservation,
+)
 from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.evidence.models import EvidenceBundle
 from app.idempotency.models import IdempotencyEvent
@@ -206,3 +211,47 @@ def test_observation_evidence_reference_model_is_workspace_scoped() -> None:
     }
     assert "ck_retrieval_observations_evidence_state_values" in checks
     assert "ck_retrieval_observations_evidence_reference_values" in checks
+
+
+def test_conversation_identity_is_workspace_scoped_and_not_content_addressed() -> None:
+    identity = _unique_constraint(
+        Conversation, "uq_conversations_workspace_source_external_id"
+    )
+    assert tuple(identity.columns.keys()) == (
+        "workspace_id",
+        "source_platform",
+        "canonical_external_discussion_id",
+    )
+    assert "normalized_content_sha256" not in _table(Conversation).c
+
+
+def test_conversation_versions_and_provenance_use_composite_workspace_fks() -> None:
+    version_identity = _unique_constraint(
+        ConversationVersion, "uq_conversation_versions_identity"
+    )
+    assert tuple(version_identity.columns.keys()) == (
+        "conversation_id",
+        "normalizer_version",
+        "normalized_content_sha256",
+    )
+    version_fk = _foreign_key_constraint(
+        ConversationVersion, "fk_conversation_versions_workspace_conversation"
+    )
+    assert tuple(version_fk.column_keys) == ("workspace_id", "conversation_id")
+
+    provenance_version_fk = _foreign_key_constraint(
+        ConversationVersionObservation,
+        "fk_conversation_version_observations_workspace_version",
+    )
+    provenance_observation_fk = _foreign_key_constraint(
+        ConversationVersionObservation,
+        "fk_conversation_version_observations_workspace_observation",
+    )
+    assert tuple(provenance_version_fk.column_keys) == (
+        "workspace_id",
+        "conversation_version_id",
+    )
+    assert tuple(provenance_observation_fk.column_keys) == (
+        "workspace_id",
+        "retrieval_observation_id",
+    )

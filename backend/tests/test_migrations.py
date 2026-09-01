@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0013_require_evidence_state"
+HEAD_REVISION = "0014_conversations"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -32,38 +32,51 @@ def _purge_observations(database_url: str) -> None:
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
-            connection.execute(
-                text("ALTER TABLE retrieval_observations DISABLE TRIGGER USER")
-            )
-            connection.execute(text("TRUNCATE retrieval_observations"))
-            connection.execute(
-                text("ALTER TABLE retrieval_observations ENABLE TRIGGER USER")
-            )
+            tables = ["retrieval_observations"]
+            existing = set(inspect(connection).get_table_names())
+            tables[:0] = [
+                table
+                for table in (
+                    "conversation_version_observations",
+                    "conversation_versions",
+                    "conversations",
+                )
+                if table in existing
+            ]
+            for table in tables:
+                connection.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER USER"))
+            connection.execute(text(f"TRUNCATE {', '.join(tables)}"))
+            for table in reversed(tables):
+                connection.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER USER"))
     finally:
         engine.dispose()
 
 
 def _purge_evidence_bundles(database_url: str) -> None:
-    """Test-only owner cleanup for the two mutually related evidence tables."""
+    """Test-only owner cleanup for the complete immutable evidence graph."""
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
             # PostgreSQL requires a referenced table and its referencing table
             # to appear in the same TRUNCATE statement, even when the child is
             # empty.  Both guards are disabled only for this owner cleanup.
-            connection.execute(
-                text("ALTER TABLE retrieval_observations DISABLE TRIGGER USER")
-            )
-            connection.execute(
-                text("ALTER TABLE evidence_bundles DISABLE TRIGGER USER")
-            )
-            connection.execute(
-                text("TRUNCATE retrieval_observations, evidence_bundles")
-            )
-            connection.execute(text("ALTER TABLE evidence_bundles ENABLE TRIGGER USER"))
-            connection.execute(
-                text("ALTER TABLE retrieval_observations ENABLE TRIGGER USER")
-            )
+            existing = set(inspect(connection).get_table_names())
+            tables = [
+                table
+                for table in (
+                    "conversation_version_observations",
+                    "conversation_versions",
+                    "conversations",
+                    "retrieval_observations",
+                    "evidence_bundles",
+                )
+                if table in existing
+            ]
+            for table in tables:
+                connection.execute(text(f"ALTER TABLE {table} DISABLE TRIGGER USER"))
+            connection.execute(text(f"TRUNCATE {', '.join(tables)}"))
+            for table in reversed(tables):
+                connection.execute(text(f"ALTER TABLE {table} ENABLE TRIGGER USER"))
     finally:
         engine.dispose()
 
@@ -108,6 +121,9 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
             "discovery_runs",
             "retrieval_observations",
             "evidence_bundles",
+            "conversations",
+            "conversation_versions",
+            "conversation_version_observations",
         }
         campaign_columns = {
             column["name"] for column in inspect(connection).get_columns("campaigns")
