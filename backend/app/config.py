@@ -65,13 +65,41 @@ class Settings(BaseSettings):
     evidence_store_max_role_bytes: int = Field(default=128, ge=1)
     evidence_store_max_media_type_bytes: int = Field(default=255, ge=1)
 
+    # LLM Task endpoints (ADR-014). Every task resolves an OpenAI-compatible
+    # base URL, model name, and API key from configuration alone; no provider
+    # name appears in code. The strong tier falls back to the ordinary tier's
+    # endpoint and model when unset. Unset ordinary configuration fails closed:
+    # a task run records `model_unconfigured` and never reaches the network.
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_strong_base_url: str | None = None
+    llm_strong_model: str | None = None
+    llm_strong_api_key: str | None = None
+    # Per-run limits enforced by Pydantic AI; Campaign/Workspace budgets stay
+    # an application concern. Output retries are the model-facing budget for
+    # schema validation failures; whole-job retries are owned by the worker.
+    llm_request_limit: int = Field(default=3, ge=1, le=10)
+    llm_output_retries: int = Field(default=1, ge=0, le=5)
+    llm_total_tokens_limit: int = Field(default=24_000, ge=1_000)
+    llm_timeout_seconds: int = Field(default=60, ge=5, le=600)
+
     model_config = SettingsConfigDict(
         env_prefix="APTORI_",
         env_file=BACKEND_ENV_FILE,
         extra="ignore",
     )
 
-    @field_validator("api_token", mode="before")
+    @field_validator(
+        "api_token",
+        "llm_base_url",
+        "llm_model",
+        "llm_api_key",
+        "llm_strong_base_url",
+        "llm_strong_model",
+        "llm_strong_api_key",
+        mode="before",
+    )
     @classmethod
     def _blank_token_is_unset(cls, value: object) -> object:
         if isinstance(value, str) and value.strip() == "":
