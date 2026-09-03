@@ -172,7 +172,7 @@ def counts(database_url: str, campaign_id: uuid.UUID) -> tuple[int, int, int]:
                 .select_from(ModelRun)
                 .where(ModelRun.correlation_id == correlation_for(campaign_id))
             )
-            return int(analyses or 0), int(opportunities or 0), int(runs or 0)
+            return analyses or 0, opportunities or 0, runs or 0
     finally:
         engine.dispose()
 
