@@ -14,6 +14,8 @@ import asyncio
 import inspect
 import json
 import shlex
+import subprocess
+import sys
 import textwrap
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -1482,6 +1484,8 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     assert WorkerSettings.job_timeout == (
         get_settings().retrieval_attempt_timeout_seconds + 60
     )
+    assert getattr(WorkerSettings, "on_startup", None) is None
+    assert getattr(WorkerSettings, "on_shutdown", None) is None
 
     cron_jobs = WorkerSettings.cron_jobs
     assert [job.coroutine for job in cron_jobs] == [reap_stale_running_runs]
@@ -1489,6 +1493,28 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     minutes = reaper_cron.minute
     assert isinstance(minutes, set)
     assert sorted(minutes) == list(range(0, 60, 5))  # every 300 seconds
+
+
+def test_worker_entrypoint_registers_all_orm_foreign_key_targets() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from app.discovery.worker import WorkerSettings; "
+                "from app.auditing.models import AuditEvent; "
+                "from app.orm import Base; "
+                "assert 'workspaces' in Base.metadata.tables; "
+                "AuditEvent.__mapper__._sorted_tables"
+            ),
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_refused_enqueue_persists_failed_fetch_rows_and_closes_processing(
