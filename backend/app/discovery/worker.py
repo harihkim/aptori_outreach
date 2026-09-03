@@ -24,20 +24,14 @@ from app.db import DatabaseSessionManager
 from app.discovery.models import DiscoveryRun
 from app.discovery.runner import run_discovery_query
 
+# The worker imports AuditEvent through its runners; register its Workspace FK
+# target in the shared metadata before any worker session can autoflush.
+from app.workspaces.models import Workspace  # noqa: F401
+
 # A run is stale once it has been running for three full attempt timeouts
 # (with a floor so a very small configured timeout cannot reap live runs).
 REAP_MULTIPLIER = 3
 REAP_FLOOR_SECONDS = 900
-
-
-def _noop_startup(ctx: dict[str, object]) -> None:
-    """arq startup hook; the runner owns its own resources per invocation."""
-    del ctx
-
-
-def _noop_shutdown(ctx: dict[str, object]) -> None:
-    """arq shutdown hook; nothing persistent to release."""
-    del ctx
 
 
 async def reap_stale_running_runs(ctx: object) -> int:
@@ -109,8 +103,6 @@ class WorkerSettings:
 
     functions = [run_discovery_query, run_thread_fetch, run_conversation_analysis]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
-    on_startup = _noop_startup
-    on_shutdown = _noop_shutdown
     # One retrieval attempt per job plus generous headroom for classification
     # and settle; a stuck job dies here even before the reaper would.
     job_timeout = get_settings().retrieval_attempt_timeout_seconds + 60
