@@ -11,6 +11,7 @@ from app.campaigns.router import router as campaigns_router
 from app.config import get_settings
 from app.db import DatabaseSessionManager
 from app.discovery.router import router as discovery_router
+from app.opportunities.router import router as opportunities_router
 from app.schemas import HealthResponse
 
 DATABASE_UNAVAILABLE_DETAIL = "database unavailable"
@@ -45,6 +46,7 @@ def create_app(
     )
     app.include_router(campaigns_router)
     app.include_router(discovery_router)
+    app.include_router(opportunities_router)
 
     @app.get(
         "/health",

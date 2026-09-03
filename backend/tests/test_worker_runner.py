@@ -14,6 +14,8 @@ import asyncio
 import inspect
 import json
 import shlex
+import subprocess
+import sys
 import textwrap
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -40,6 +42,7 @@ from app.conversations.models import (
 from app.conversations.normalizer import NORMALIZER_VERSION, normalize_reddit_thread
 from app.conversations.runner import run_thread_fetch
 from app.discovery import events as progress_events
+from app.discovery import queue as discovery_queue
 from app.discovery.events import ProgressEvent
 from app.discovery.models import DiscoveryRun, RetrievalObservation
 from app.discovery.observations import STATUS_VALUES
@@ -469,7 +472,15 @@ def test_success_and_no_results_complete_the_run(
 
 def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -> None:
     harness.write_doc("q-a", fixture_doc("q-a", "success"))
-    harness.write_doc("q-b", fixture_doc("q-b", "blocked"))
+    harness.write_doc(
+        "q-b",
+        fixture_doc(
+            "q-b",
+            "blocked",
+            rawArtifact=None,
+            failureReason="access challenge detected in rendered page",
+        ),
+    )
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
     invoke(run_id, "q-a")
@@ -481,6 +492,24 @@ def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -
     blocked_row = row_by_query(load_rows(worker_db, run_id), "q-b")
     assert blocked_row.status == "blocked"
     assert blocked_row.failure_class is None
+    assert blocked_row.failure_reason == "access challenge detected in rendered page"
+    assert blocked_row.evidence_state == "none"
+    assert blocked_row.evidence_bundle_id is None
+    assert blocked_row.raw_artifact is None
+
+
+def test_success_without_raw_artifact_still_fails_closed(
+    harness: StubHarness, worker_db: str
+) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success", rawArtifact=None))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
+
+    assert invoke(run_id, "q-a") == "failed"
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unreadable"
+    assert row.evidence_state == "none"
 
 
 def test_blocked_and_rate_limited_fail_the_run(
@@ -586,6 +615,9 @@ def test_worker_publishes_live_progress_after_persisting_observation(
         "discovery.candidate_found",
         "retrieval.observed",
         "discovery.completed",
+        # The fixture Candidate carries no externalSourceId, so nothing is
+        # expected downstream and the run's completion closes the stage.
+        "conversation.processing_completed",
     ]
     assert all(item.run_id == run_id for item in bus.events)
     assert all(item.workspace_id == DEFAULT_WORKSPACE_ID for item in bus.events)
@@ -754,6 +786,39 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
     monkeypatch.setattr(
         conversation_service, "normalize_observation", assert_committed_then_normalize
     )
+    analysis_jobs: list[dict[str, object]] = []
+
+    async def fake_analysis_enqueue(*args: object, **kwargs: object) -> str:
+        del args
+        analysis_jobs.append(dict(kwargs))
+        return "analysis-job"
+
+    async def fake_analysis_enqueue_positional(
+        workspace_id: object,
+        campaign_id: object,
+        conversation_id: object,
+        conversation_version_id: object,
+        correlation_id: str,
+        *,
+        discovery_run_id: object = None,
+    ) -> str:
+        analysis_jobs.append(
+            {
+                "workspace_id": workspace_id,
+                "campaign_id": campaign_id,
+                "conversation_id": conversation_id,
+                "conversation_version_id": conversation_version_id,
+                "correlation_id": correlation_id,
+                "discovery_run_id": discovery_run_id,
+            }
+        )
+        return "analysis-job"
+
+    del fake_analysis_enqueue
+    monkeypatch.setattr(
+        "app.discovery.queue.enqueue_conversation_analysis",
+        fake_analysis_enqueue_positional,
+    )
     result = asyncio.run(
         run_thread_fetch(
             None,
@@ -776,6 +841,13 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
         "conversation.normalized",
         "conversation.processing_completed",
     ]
+    # Normalization hands the new Version to the analysis worker for the
+    # run's Campaign; Redis is never touched in tests.
+    assert len(analysis_jobs) == 1
+    assert analysis_jobs[0]["workspace_id"] == DEFAULT_WORKSPACE_ID
+    assert analysis_jobs[0]["campaign_id"] == load_run(worker_db, run_id).campaign_id
+    assert analysis_jobs[0]["correlation_id"] == "corr-thread"
+    assert analysis_jobs[0]["discovery_run_id"] == run_id
     engine = create_engine(worker_db)
     try:
         with Session(engine) as session:
@@ -814,6 +886,66 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
         )
         == "run_missing"
     )
+
+
+def test_thread_fetch_preserves_block_without_raw_evidence(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = {
+        "url": "https://www.reddit.com/r/example/comments/post/example/",
+        "externalSourceId": "t3_post",
+    }
+    harness.write_doc(
+        "q-a",
+        fixture_doc("q-a", "success", candidateCount=1, candidates=[candidate]),
+    )
+
+    async def fake_enqueue(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        return ["thread-job"]
+
+    monkeypatch.setattr(
+        "app.discovery.queue.enqueue_thread_fetch_candidates", fake_enqueue
+    )
+    run_id = seed_run(worker_db, correlation_id="corr-thread", query_ids=["q-a"])
+    assert invoke(run_id, "q-a", correlation_id="corr-thread") == "succeeded"
+
+    query_id = thread_fetch_query_id("t3_post")
+    harness.write_doc(
+        query_id,
+        fixture_doc(
+            query_id,
+            "blocked",
+            capability="thread_fetch",
+            rawArtifact=None,
+            failureReason="challenge parameters appeared in final URL",
+            sourceUrl=candidate["url"],
+            finalUrl=candidate["url"],
+            externalSourceId="t3_post",
+        ),
+    )
+
+    result = asyncio.run(
+        run_thread_fetch(
+            None,
+            workspace_id=str(DEFAULT_WORKSPACE_ID),
+            run_id=str(run_id),
+            correlation_id="corr-thread",
+            external_source_id="t3_post",
+            url=candidate["url"],
+        )
+    )
+
+    assert result == "blocked"
+    row = row_by_query(load_rows(worker_db, run_id), query_id)
+    assert row.status == "blocked"
+    assert row.failure_class is None
+    assert row.failure_reason == "challenge parameters appeared in final URL"
+    assert row.evidence_state == "none"
+    assert row.evidence_bundle_id is None
+    assert row.raw_artifact is None
 
 
 def test_timeout_without_disk_evidence_classifies_transport_timeout(
@@ -1413,10 +1545,15 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     """The worker runs exactly the deployed configuration: no override channel."""
     from arq.connections import RedisSettings
 
+    from app.analysis.runner import run_conversation_analysis
     from app.conversations.runner import run_thread_fetch
     from app.discovery.worker import WorkerSettings
 
-    assert WorkerSettings.functions == [run_discovery_query, run_thread_fetch]
+    assert WorkerSettings.functions == [
+        run_discovery_query,
+        run_thread_fetch,
+        run_conversation_analysis,
+    ]
     parameters = inspect.signature(run_discovery_query).parameters
     assert list(parameters) == [
         "ctx",
@@ -1433,6 +1570,8 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     assert WorkerSettings.job_timeout == (
         get_settings().retrieval_attempt_timeout_seconds + 60
     )
+    assert getattr(WorkerSettings, "on_startup", None) is None
+    assert getattr(WorkerSettings, "on_shutdown", None) is None
 
     cron_jobs = WorkerSettings.cron_jobs
     assert [job.coroutine for job in cron_jobs] == [reap_stale_running_runs]
@@ -1440,3 +1579,120 @@ def test_worker_settings_registers_the_plain_runner() -> None:
     minutes = reaper_cron.minute
     assert isinstance(minutes, set)
     assert sorted(minutes) == list(range(0, 60, 5))  # every 300 seconds
+
+
+def test_worker_entrypoint_registers_all_orm_foreign_key_targets() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from app.discovery.worker import WorkerSettings; "
+                "from app.auditing.models import AuditEvent; "
+                "from app.orm import Base; "
+                "assert 'workspaces' in Base.metadata.tables; "
+                "AuditEvent.__mapper__._sorted_tables"
+            ),
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_refused_enqueue_persists_failed_fetch_rows_and_closes_processing(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Candidate the queue refuses must not keep processing open forever."""
+    # Conversations are Workspace-scoped identities shared across runs, so
+    # this Candidate must not collide with one another test normalized.
+    external_id = f"t3_{uuid.uuid4().hex[:10]}"
+    candidate = {
+        "rank": 1,
+        "url": f"https://www.reddit.com/r/example/comments/{external_id[3:]}/x/",
+        "externalSourceId": external_id,
+        "title": "Example",
+    }
+    harness.write_doc(
+        "q-a", fixture_doc("q-a", "success", candidateCount=1, candidates=[candidate])
+    )
+
+    async def refuse(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        raise discovery_queue.ThreadFetchQueueError([external_id])
+
+    monkeypatch.setattr("app.discovery.queue.enqueue_thread_fetch_candidates", refuse)
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+    run_id = seed_run(worker_db, correlation_id="corr-refused", query_ids=["q-a"])
+
+    assert invoke(run_id, "q-a", correlation_id="corr-refused") == "succeeded"
+
+    rows = load_rows(worker_db, run_id)
+    assert [row.capability for row in rows] == ["discovery", "thread_fetch"]
+    refused = rows[1]
+    assert refused.status == "failed"
+    assert refused.failure_class == "transport_error"
+    assert refused.evidence_state == "none"
+    assert refused.external_source_id == external_id
+    assert refused.source_url == candidate["url"]
+    assert refused.query_id == thread_fetch_query_id(external_id)
+    assert [item.type for item in bus.events] == [
+        "discovery.started",
+        "job.failed",
+        "discovery.candidate_found",
+        "retrieval.observed",
+        "discovery.completed",
+        "conversation.processing_completed",
+    ]
+    assert bus.events[-1].payload == {
+        "expected_count": 1,
+        "fetched_count": 1,
+        "normalized_count": 0,
+    }
+
+    # Replaying the settled query is a no-op and never duplicates the row.
+    assert invoke(run_id, "q-a", correlation_id="corr-refused") == "already_done"
+    assert len(load_rows(worker_db, run_id)) == 2
+
+
+def test_non_http_candidate_urls_are_neither_enqueued_nor_expected(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [
+        {
+            "rank": 1,
+            "url": "reddit.com/r/example/comments/a/",
+            "externalSourceId": "t3_a",
+        },
+        {"rank": 2, "url": "ftp://example.test/b", "externalSourceId": "t3_b"},
+    ]
+    harness.write_doc(
+        "q-a", fixture_doc("q-a", "success", candidateCount=2, candidates=candidates)
+    )
+    bus = RecordingEventBus()
+    monkeypatch.setattr(progress_events, "DEFAULT_EVENT_BUS", bus)
+    run_id = seed_run(worker_db, correlation_id="corr-nonhttp", query_ids=["q-a"])
+
+    # No Redis is configured for tests: reaching the pool would raise, so the
+    # early return on an empty enqueue set is itself the assertion.
+    assert invoke(run_id, "q-a", correlation_id="corr-nonhttp") == "succeeded"
+
+    engine = create_engine(worker_db)
+    try:
+        with Session(engine) as session:
+            transitions = conversation_service.list_run_transitions(
+                session, DEFAULT_WORKSPACE_ID, run_id
+            )
+    finally:
+        engine.dispose()
+    assert transitions.expected_count == 0
+    assert transitions.processing_complete is True
+    assert bus.events[-1].type == "conversation.processing_completed"

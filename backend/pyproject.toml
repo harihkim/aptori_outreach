@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "uvicorn[standard]>=0.30",
     "arq>=0.26",
+    "pydantic-ai-slim[openai]>=2.37,<3",
 ]
 
 [dependency-groups]

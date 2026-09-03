@@ -13,7 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.workspaces import DEFAULT_WORKSPACE_ID
 from tests.conftest import TEST_DATABASE_URL
 
-HEAD_REVISION = "0014_conversations"
+HEAD_REVISION = "0016_native_no_evidence"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -37,6 +37,9 @@ def _purge_observations(database_url: str) -> None:
             tables[:0] = [
                 table
                 for table in (
+                    "opportunities",
+                    "analyses",
+                    "model_runs",
                     "conversation_version_observations",
                     "conversation_versions",
                     "conversations",
@@ -64,6 +67,9 @@ def _purge_evidence_bundles(database_url: str) -> None:
             tables = [
                 table
                 for table in (
+                    "opportunities",
+                    "analyses",
+                    "model_runs",
                     "conversation_version_observations",
                     "conversation_versions",
                     "conversations",
@@ -124,6 +130,9 @@ def test_domain_migration_applies_and_rolls_back_cleanly(
             "conversations",
             "conversation_versions",
             "conversation_version_observations",
+            "model_runs",
+            "analyses",
+            "opportunities",
         }
         campaign_columns = {
             column["name"] for column in inspect(connection).get_columns("campaigns")
@@ -1086,6 +1095,8 @@ def test_evidence_bundle_and_reference_checks_reject_invalid_rows(
             ("bundle", bundle_id, "/legacy", "success", None),
             ("legacy", bundle_id, "/legacy", "success", None),
             ("none", None, None, "success", "transport_error"),
+            ("none", None, None, "success", None),
+            ("none", None, None, "blocked", "transport_error"),
         )
         for index, (state, reference, directory, status, failure_class) in enumerate(
             invalid_rows
@@ -1105,6 +1116,19 @@ def test_evidence_bundle_and_reference_checks_reject_invalid_rows(
                     status=status,
                     failure_class=failure_class,
                 )
+
+        with engine.begin() as connection:
+            _insert_observation(
+                connection,
+                uuid.uuid4(),
+                run_id,
+                DEFAULT_WORKSPACE_ID,
+                query_id="native-block-without-evidence",
+                correlation_id="native-block-without-evidence",
+                evidence_state="none",
+                status="blocked",
+                failure_class=None,
+            )
     finally:
         _finish_evidence_case(
             migrated_test_database,

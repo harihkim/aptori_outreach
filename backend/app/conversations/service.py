@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.conversations.identity import is_http_url
 from app.conversations.models import (
     Conversation,
     ConversationVersion,
@@ -327,13 +328,29 @@ def current_version(
     session: Session, workspace_id: uuid.UUID, conversation_id: uuid.UUID
 ) -> ConversationVersion | None:
     """Select current content by evidence time and immutable tie-breakers."""
+    return current_versions(session, workspace_id, [conversation_id]).get(
+        conversation_id
+    )
+
+
+def current_versions(
+    session: Session, workspace_id: uuid.UUID, conversation_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, ConversationVersion]:
+    """Batch form of ``current_version``: two queries for any number of ids.
+
+    The first query orders every (conversation, version) pair by the same
+    evidence-time and immutable tie-breakers as the single-row selector and
+    keeps the first id per Conversation; the second loads only those rows.
+    """
+    if not conversation_ids:
+        return {}
     observed_at = func.coalesce(
         RetrievalObservation.completed_at,
         RetrievalObservation.started_at,
         RetrievalObservation.created_at,
     )
-    return session.scalar(
-        select(ConversationVersion)
+    ordered = session.execute(
+        select(ConversationVersion.conversation_id, ConversationVersion.id)
         .join(
             ConversationVersionObservation,
             (ConversationVersionObservation.workspace_id == workspace_id)
@@ -352,7 +369,7 @@ def current_version(
         )
         .where(
             ConversationVersion.workspace_id == workspace_id,
-            ConversationVersion.conversation_id == conversation_id,
+            ConversationVersion.conversation_id.in_(conversation_ids),
         )
         .order_by(
             observed_at.desc(),
@@ -360,8 +377,19 @@ def current_version(
             ConversationVersion.normalizer_version.desc(),
             ConversationVersion.id.desc(),
         )
-        .limit(1)
+    ).all()
+    winners: dict[uuid.UUID, uuid.UUID] = {}
+    for conversation_id, version_id in ordered:
+        winners.setdefault(conversation_id, version_id)
+    if not winners:
+        return {}
+    rows = session.scalars(
+        select(ConversationVersion).where(
+            ConversationVersion.workspace_id == workspace_id,
+            ConversationVersion.id.in_(list(winners.values())),
+        )
     )
+    return {row.conversation_id: row for row in rows}
 
 
 def _candidate_fields(
@@ -373,7 +401,7 @@ def _candidate_fields(
     rank = candidate.get("rank")
     if not isinstance(external_id, str) or not external_id:
         return None
-    if not isinstance(url, str) or not url:
+    if not is_http_url(url):
         return None
     return (
         external_id,
@@ -429,6 +457,21 @@ def list_run_transitions(
         )
         if row.external_source_id is not None
     }
+    conversations: dict[str, Conversation] = {}
+    if ordered:
+        conversations = {
+            row.canonical_external_discussion_id: row
+            for row in session.scalars(
+                select(Conversation).where(
+                    Conversation.workspace_id == workspace_id,
+                    Conversation.source_platform == "reddit",
+                    Conversation.canonical_external_discussion_id.in_(list(ordered)),
+                )
+            )
+        }
+    versions = current_versions(
+        session, workspace_id, [row.id for row in conversations.values()]
+    )
     items: list[CandidateTransition] = []
     fetched_count = 0
     normalized_count = 0
@@ -436,18 +479,8 @@ def list_run_transitions(
         fetch = fetch_rows.get(external_id)
         if fetch is not None:
             fetched_count += 1
-        conversation = session.scalar(
-            select(Conversation).where(
-                Conversation.workspace_id == workspace_id,
-                Conversation.source_platform == "reddit",
-                Conversation.canonical_external_discussion_id == external_id,
-            )
-        )
-        version = (
-            current_version(session, workspace_id, conversation.id)
-            if conversation is not None
-            else None
-        )
+        conversation = conversations.get(external_id)
+        version = versions.get(conversation.id) if conversation is not None else None
         if version is not None:
             normalized_count += 1
         items.append(

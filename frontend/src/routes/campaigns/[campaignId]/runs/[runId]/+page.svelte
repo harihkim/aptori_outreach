@@ -22,10 +22,16 @@
 	const items = $derived(data.observationsState.items);
 	const hasOlderObservations = $derived(data.observationsState.nextCursor !== null);
 	const transitions = $derived(data.conversationsState.items);
+	// A run is live while discovery executes, and afterwards until the
+	// backend durably reports Candidate-to-Conversation processing complete.
+	// An unreadable transition answer (not found, unreachable, malformed)
+	// is not evidence that work remains, so it never keeps the page live by
+	// itself; sticky state below covers transient outages of a known-live run.
+	const transitionsKnown = $derived(data.conversationsState.detail === null);
 	const isLive = $derived(
 		run?.status === 'queued' ||
 			run?.status === 'running' ||
-			!data.conversationsState.processingComplete
+			(run !== null && transitionsKnown && !data.conversationsState.processingComplete)
 	);
 	// Preserve last-known live status across transient unreachable polls so
 	// polling does not permanently stop and the retrying banner can render.
@@ -35,7 +41,8 @@
 		if (isLive) {
 			stickyLive = true;
 		} else if (run !== null && data.conversationsState.processingComplete) {
-			// run is non-null and terminal — this is an authoritative value.
+			// run is non-null, terminal, and processing is durably complete —
+			// this is an authoritative value.
 			stickyLive = false;
 		}
 	});
@@ -274,60 +281,60 @@
 			</Card.Content>
 		</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Candidates to Conversations</Card.Title>
-					<Card.Description>
-						{data.conversationsState.normalizedCount} of {data.conversationsState.expectedCount}
-						candidates normalized from retained evidence.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content>
-					{#if data.conversationsState.detail}
-						<p class="text-sm text-destructive" role="alert">{data.conversationsState.detail}</p>
-					{:else if transitions.length === 0}
-						<p class="text-sm text-muted-foreground">No candidates found yet.</p>
-					{:else}
-						<ul class="grid gap-3" data-testid="candidate-conversation-list">
-							{#each transitions as transition (transition.externalSourceId)}
-								<li class="rounded-md border p-3">
-									<div class="flex items-start justify-between gap-3">
-										<div class="min-w-0">
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Candidates to Conversations</Card.Title>
+				<Card.Description>
+					{data.conversationsState.normalizedCount} of {data.conversationsState.expectedCount}
+					candidates normalized from retained evidence.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content>
+				{#if data.conversationsState.detail}
+					<p class="text-sm text-destructive" role="alert">{data.conversationsState.detail}</p>
+				{:else if transitions.length === 0}
+					<p class="text-sm text-muted-foreground">No candidates found yet.</p>
+				{:else}
+					<ul class="grid gap-3" data-testid="candidate-conversation-list">
+						{#each transitions as transition (transition.externalSourceId)}
+							<li class="rounded-md border p-3">
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0">
 										<a
 											class="line-clamp-2 font-medium hover:underline"
 											href={transition.url}
 											data-sveltekit-reload
 											rel="noopener noreferrer"
 										>
-												{transition.title || transition.externalSourceId}
-											</a>
-											<p class="mt-1 font-mono text-xs text-muted-foreground">
-												{transition.externalSourceId}
-											</p>
-										</div>
-										<Badge variant="outline">
-											{transition.state === 'conversation' ? 'Conversation' : 'Candidate'}
-										</Badge>
-									</div>
-									{#if transition.conversation}
-										<p class="mt-2 text-xs text-muted-foreground">
-											{transition.conversation.currentVersion.normalizerVersion} ·
-											{transition.conversation.currentVersion.normalizedContentSha256.slice(0, 12)}
-											{transition.conversation.currentVersion.sourceTreeExhausted ? ' · complete tree' : ' · incomplete tree'}
+											{transition.title || transition.externalSourceId}
+										</a>
+										<p class="mt-1 font-mono text-xs text-muted-foreground">
+											{transition.externalSourceId}
 										</p>
-									{:else if transition.retrievalStatus}
-										<p class="mt-2 text-xs text-muted-foreground">Fetch: {transition.retrievalStatus}</p>
-									{/if}
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</Card.Content>
-			</Card.Root>
+									</div>
+									<Badge variant="outline">
+										{transition.state === 'conversation' ? 'Conversation' : 'Candidate'}
+									</Badge>
+								</div>
+								{#if transition.conversation}
+									<p class="mt-2 text-xs text-muted-foreground">
+										{transition.conversation.currentVersion.normalizerVersion} ·
+										{transition.conversation.currentVersion.normalizedContentSha256.slice(0, 12)}
+										{transition.conversation.currentVersion.sourceTreeExhausted ? ' · complete tree' : ' · incomplete tree'}
+									</p>
+								{:else if transition.retrievalStatus}
+									<p class="mt-2 text-xs text-muted-foreground">Fetch: {transition.retrievalStatus}</p>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</Card.Content>
+		</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Observations</Card.Title>
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Observations</Card.Title>
 				<Card.Description>Append-only evidence; rows can never be revised.</Card.Description>
 			</Card.Header>
 			<Card.Content>

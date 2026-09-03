@@ -82,7 +82,7 @@ class LegacyEvidenceResponse(BaseModel):
 
 
 class NoEvidenceResponse(BaseModel):
-    """Explicit marker for a failed observation with no retained evidence."""
+    """Explicit marker for an observation with no retained raw evidence."""
 
     model_config = ConfigDict(extra="forbid")
 

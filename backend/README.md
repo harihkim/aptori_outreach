@@ -63,3 +63,24 @@ missing-annotation errors. Use `uv run ruff check app tests --fix` for Ruff's
 safe automatic lint fixes and `uv run ruff format app tests` to format.
 
 Configuration is environment-driven with the `APTORI_` prefix (see `app/config.py`). Copy `.env.example` to the git-ignored `backend/.env`; the backend resolves that file relative to its own package, independent of the process working directory. Production deployments should inject environment variables directly.
+
+## LLM Tasks, analysis, and Opportunities
+
+`app/llm` is the LLM Task Runner boundary (ADR-005, ADR-014): each named task
+carries task, prompt, and schema versions; the endpoint (base URL, model,
+key) resolves from `APTORI_LLM_*` configuration alone, with a strong tier
+that falls back to the ordinary tier while unset; every attempt is recorded
+as an immutable Model Run holding requested versus actual model, token usage,
+retry counts, digests of the prompt and output (never their text), and a
+failure class. `app/analysis` runs the `analyze_conversation` task for each
+new Conversation Version (the thread-fetch worker enqueues
+`run_conversation_analysis`), rejects out-of-range or internally
+inconsistent factors before any score exists, and computes the Opportunity
+Score with frozen formula v1.0 (`app/analysis/scoring.py`) in application
+code. `GET /opportunities` and `GET /opportunities/{id}` return the ranked,
+explainable result with its Analysis and Model Run provenance.
+
+Tests never reach a real model: `tests/conftest.py` sets Pydantic AI's
+`ALLOW_MODEL_REQUESTS = False`, and LLM tests inject `TestModel` or
+`FunctionModel` through `app.analysis.runner.MODEL_OVERRIDE` or the runner's
+`model_override`.

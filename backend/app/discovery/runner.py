@@ -38,12 +38,15 @@ from sqlalchemy.orm import Session
 
 from app.auditing.service import record_audit
 from app.config import get_settings
+from app.conversations import service as conversation_service
+from app.conversations.identity import thread_fetch_query_id
 from app.db import DatabaseSessionManager
 from app.discovery import cli, queue
 from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import (
     FAILURE_CLASSES,
+    NATIVE_NO_EVIDENCE_STATUSES,
     RUN_COST_STATUSES,
     RUN_COST_UNPRICED,
     DiscoveryRun,
@@ -324,6 +327,41 @@ def _failed_document_observation(
     )
 
 
+def _document_observation_without_evidence(
+    run: DiscoveryRun,
+    query_id: str,
+    correlation_id: str,
+    doc: ObservationDocument,
+    *,
+    capability: str = EXPECTED_CAPABILITY,
+    external_source_id: str | None = None,
+) -> RetrievalObservation:
+    """Persist a native failure that intentionally retained no raw payload."""
+    if doc.status not in NATIVE_NO_EVIDENCE_STATUSES:
+        raise ValueError(f"status {doc.status!r} requires retained raw evidence")
+    return _new_observation(
+        run,
+        query_id,
+        correlation_id,
+        schema_version=doc.schema_version,
+        provider_variant=doc.provider_variant,
+        config_sha256=doc.config_sha256,
+        observation_id=doc.observation_id,
+        status=doc.status,
+        evidence_state="none",
+        capability=capability,
+        failure_reason=doc.failure_reason,
+        source_url=doc.source_url,
+        final_url=doc.final_url,
+        external_source_id=doc.external_source_id or external_source_id,
+        elapsed_ms=doc.elapsed_ms,
+        started_at=_parse_iso(doc.started_at),
+        completed_at=_parse_iso(doc.completed_at),
+        runtime=doc.runtime,
+        network=doc.network,
+    )
+
+
 def _unclassified_observation(
     run: DiscoveryRun,
     query_id: str,
@@ -386,6 +424,10 @@ def _outcome_to_row(
             outcome.doc,
             failure_class=outcome.failure_class,
             failure_reason=outcome.failure_reason or "raw evidence is unavailable",
+        )
+    if outcome.doc is not None and outcome.doc.status in NATIVE_NO_EVIDENCE_STATUSES:
+        return _document_observation_without_evidence(
+            run, query_id, correlation_id, outcome.doc
         )
     return _unclassified_observation(
         run,
@@ -593,6 +635,46 @@ def _evidence_failure_reason(error: BaseException) -> str:
     """Render storage failures without copying provider-controlled paths."""
     error_code = type(error).__name__
     return f"raw evidence could not be finalized ({error_code})"
+
+
+def _finalize_attempt_evidence(
+    outcome: _AttemptOutcome,
+    *,
+    workspace_id: uuid.UUID,
+    staging_root: Path,
+    output_root: Path,
+    query_id: str,
+    evidence_store: EvidenceStore,
+) -> _AttemptOutcome:
+    """Finalize declared evidence while preserving honest no-evidence failures."""
+    doc = outcome.doc
+    if doc is None:
+        return outcome
+    if doc.raw_artifact is None and doc.status in NATIVE_NO_EVIDENCE_STATUSES:
+        return outcome
+    try:
+        artifact = _raw_artifact_input(doc, staging_root, output_root, query_id)
+        bundle = evidence_store.finalize_bundle(workspace_id, [artifact])
+        if not evidence_store.verify_bundle(bundle):
+            raise EvidenceStoreError("finalized raw evidence failed verification")
+        return _AttemptOutcome(
+            evidence_directory=outcome.evidence_directory,
+            doc=doc,
+            bundle=bundle,
+            raw_artifact=_raw_artifact_metadata(bundle),
+        )
+    except (
+        ArtifactValidationError,
+        EvidenceStoreError,
+        OSError,
+        ValueError,
+    ) as error:
+        return _AttemptOutcome(
+            evidence_directory=outcome.evidence_directory,
+            doc=doc,
+            failure_class="evidence_unreadable",
+            failure_reason=_evidence_failure_reason(error),
+        )
 
 
 def _cleanup_staging_attempt(
@@ -867,37 +949,14 @@ async def _spawn_attempt(
             timeout_seconds=config.timeout_seconds,
         )
         outcome = _classify_result(result, output_root, config.timeout_seconds)
-        if outcome.doc is not None:
-            try:
-                artifact = _raw_artifact_input(
-                    outcome.doc, config.staging_root, output_root, query_id
-                )
-                bundle = config.evidence_store.finalize_bundle(
-                    claim.workspace_id, [artifact]
-                )
-                if not config.evidence_store.verify_bundle(bundle):
-                    raise EvidenceStoreError(
-                        "finalized raw evidence failed verification"
-                    )
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    bundle=bundle,
-                    raw_artifact=_raw_artifact_metadata(bundle),
-                )
-            except (
-                ArtifactValidationError,
-                EvidenceStoreError,
-                OSError,
-                ValueError,
-            ) as error:
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    failure_class="evidence_unreadable",
-                    failure_reason=_evidence_failure_reason(error),
-                )
-        return outcome
+        return _finalize_attempt_evidence(
+            outcome,
+            workspace_id=claim.workspace_id,
+            staging_root=config.staging_root,
+            output_root=output_root,
+            query_id=query_id,
+            evidence_store=config.evidence_store,
+        )
     finally:
         _cleanup_staging_attempt(config.staging_root, output_root, query_id)
 
@@ -1034,7 +1093,100 @@ async def _publish_progress(
     )
 
 
+def _persist_unenqueued_fetches(
+    manager: DatabaseSessionManager,
+    claim: _Claim,
+    candidates: list[dict[str, Any]],
+    failed_external_ids: list[str],
+) -> int:
+    """Record a failed thread-fetch row for every Candidate the queue refused.
+
+    Without a durable row the Candidate would count as expected but never
+    fetched, so Candidate-to-Conversation processing could never complete
+    and every viewer would wait forever. The row is append-only and keyed by
+    the same query id a later successful enqueue would claim, so a recovered
+    queue simply finds it already recorded.
+    """
+    urls: dict[str, str] = {}
+    for candidate in candidates:
+        external_id = candidate.get("externalSourceId")
+        url = candidate.get("url")
+        if isinstance(external_id, str) and isinstance(url, str):
+            urls.setdefault(external_id, url)
+    written = 0
+    with manager.session_factory() as session, session.begin():
+        run = session.scalar(
+            select(DiscoveryRun).where(
+                DiscoveryRun.workspace_id == claim.workspace_id,
+                DiscoveryRun.id == claim.run_id,
+            )
+        )
+        if run is None:
+            return 0
+        for external_id in failed_external_ids:
+            query_id = thread_fetch_query_id(external_id)
+            existing = session.scalar(
+                select(RetrievalObservation.id).where(
+                    RetrievalObservation.workspace_id == claim.workspace_id,
+                    RetrievalObservation.discovery_run_id == claim.run_id,
+                    RetrievalObservation.query_id == query_id,
+                )
+            )
+            if existing is not None:
+                continue
+            session.add(
+                _new_observation(
+                    run,
+                    query_id,
+                    run.correlation_id,
+                    schema_version=1,
+                    provider_variant="unknown-thread-fetch",
+                    config_sha256="0" * 64,
+                    observation_id=f"{run.id}:{query_id}:unenqueued",
+                    status="failed",
+                    evidence_state="none",
+                    capability="thread_fetch",
+                    external_source_id=external_id[:512] or None,
+                    source_url=(urls.get(external_id) or "")[:2048] or None,
+                    failure_class="transport_error",
+                    failure_reason="thread-fetch job was refused by the worker queue",
+                )
+            )
+            written += 1
+        session.flush()
+    return written
+
+
+async def _publish_processing_complete_if_ready(
+    manager: DatabaseSessionManager, claim: _Claim, correlation_id: str
+) -> None:
+    """Close the Candidate-to-Conversation stage from the discovery side.
+
+    Thread-fetch workers publish this event when their own settle completes
+    the stage. When the run turns terminal after every fetch has already
+    settled (a final query with no new Candidates, or refused enqueues), no
+    fetch worker remains to publish it, so the run's completion must.
+    """
+    with manager.session_factory() as session:
+        transitions = conversation_service.list_run_transitions(
+            session, claim.workspace_id, claim.run_id
+        )
+    if transitions.processing_complete:
+        await _publish_progress(
+            event_type="conversation.processing_completed",
+            run_id=claim.run_id,
+            workspace_id=claim.workspace_id,
+            correlation_id=correlation_id,
+            payload={
+                "expected_count": transitions.expected_count,
+                "fetched_count": transitions.fetched_count,
+                "normalized_count": transitions.normalized_count,
+            },
+        )
+
+
 async def _publish_attempt_progress(
+    manager: DatabaseSessionManager,
     claim: _Claim,
     correlation_id: str,
     settlement: _Settlement,
@@ -1055,6 +1207,9 @@ async def _publish_attempt_progress(
             candidates,
         )
     except queue.ThreadFetchQueueError as error:
+        _persist_unenqueued_fetches(
+            manager, claim, candidates, error.failed_external_ids
+        )
         await _publish_progress(
             event_type="job.failed",
             run_id=claim.run_id,
@@ -1105,6 +1260,7 @@ async def _publish_attempt_progress(
                 "metrics": settlement.metrics,
             },
         )
+        await _publish_processing_complete_if_ready(manager, claim, correlation_id)
 
 
 async def run_discovery_query(
@@ -1160,7 +1316,7 @@ async def run_discovery_query(
             claim.planned_ids,
         )
         if settlement.recorded:
-            await _publish_attempt_progress(claim, correlation_id, settlement)
+            await _publish_attempt_progress(manager, claim, correlation_id, settlement)
         return settlement.status
     finally:
         manager.dispose()
