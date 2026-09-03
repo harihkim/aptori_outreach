@@ -472,7 +472,15 @@ def test_success_and_no_results_complete_the_run(
 
 def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -> None:
     harness.write_doc("q-a", fixture_doc("q-a", "success"))
-    harness.write_doc("q-b", fixture_doc("q-b", "blocked"))
+    harness.write_doc(
+        "q-b",
+        fixture_doc(
+            "q-b",
+            "blocked",
+            rawArtifact=None,
+            failureReason="access challenge detected in rendered page",
+        ),
+    )
     run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a", "q-b"])
 
     invoke(run_id, "q-a")
@@ -484,6 +492,24 @@ def test_success_plus_blocked_is_partial(harness: StubHarness, worker_db: str) -
     blocked_row = row_by_query(load_rows(worker_db, run_id), "q-b")
     assert blocked_row.status == "blocked"
     assert blocked_row.failure_class is None
+    assert blocked_row.failure_reason == "access challenge detected in rendered page"
+    assert blocked_row.evidence_state == "none"
+    assert blocked_row.evidence_bundle_id is None
+    assert blocked_row.raw_artifact is None
+
+
+def test_success_without_raw_artifact_still_fails_closed(
+    harness: StubHarness, worker_db: str
+) -> None:
+    harness.write_doc("q-a", fixture_doc("q-a", "success", rawArtifact=None))
+    run_id = seed_run(worker_db, correlation_id="corr-123", query_ids=["q-a"])
+
+    assert invoke(run_id, "q-a") == "failed"
+
+    row = row_by_query(load_rows(worker_db, run_id), "q-a")
+    assert row.status == "failed"
+    assert row.failure_class == "evidence_unreadable"
+    assert row.evidence_state == "none"
 
 
 def test_blocked_and_rate_limited_fail_the_run(
@@ -860,6 +886,66 @@ def test_candidate_fetch_commits_bundle_before_normalization_and_emits_transitio
         )
         == "run_missing"
     )
+
+
+def test_thread_fetch_preserves_block_without_raw_evidence(
+    harness: StubHarness,
+    worker_db: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = {
+        "url": "https://www.reddit.com/r/example/comments/post/example/",
+        "externalSourceId": "t3_post",
+    }
+    harness.write_doc(
+        "q-a",
+        fixture_doc("q-a", "success", candidateCount=1, candidates=[candidate]),
+    )
+
+    async def fake_enqueue(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        return ["thread-job"]
+
+    monkeypatch.setattr(
+        "app.discovery.queue.enqueue_thread_fetch_candidates", fake_enqueue
+    )
+    run_id = seed_run(worker_db, correlation_id="corr-thread", query_ids=["q-a"])
+    assert invoke(run_id, "q-a", correlation_id="corr-thread") == "succeeded"
+
+    query_id = thread_fetch_query_id("t3_post")
+    harness.write_doc(
+        query_id,
+        fixture_doc(
+            query_id,
+            "blocked",
+            capability="thread_fetch",
+            rawArtifact=None,
+            failureReason="challenge parameters appeared in final URL",
+            sourceUrl=candidate["url"],
+            finalUrl=candidate["url"],
+            externalSourceId="t3_post",
+        ),
+    )
+
+    result = asyncio.run(
+        run_thread_fetch(
+            None,
+            workspace_id=str(DEFAULT_WORKSPACE_ID),
+            run_id=str(run_id),
+            correlation_id="corr-thread",
+            external_source_id="t3_post",
+            url=candidate["url"],
+        )
+    )
+
+    assert result == "blocked"
+    row = row_by_query(load_rows(worker_db, run_id), query_id)
+    assert row.status == "blocked"
+    assert row.failure_class is None
+    assert row.failure_reason == "challenge parameters appeared in final URL"
+    assert row.evidence_state == "none"
+    assert row.evidence_bundle_id is None
+    assert row.raw_artifact is None
 
 
 def test_timeout_without_disk_evidence_classifies_transport_timeout(

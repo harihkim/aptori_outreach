@@ -46,6 +46,7 @@ from app.discovery import events as progress_events
 from app.discovery.events import ProgressEvent
 from app.discovery.models import (
     FAILURE_CLASSES,
+    NATIVE_NO_EVIDENCE_STATUSES,
     RUN_COST_STATUSES,
     RUN_COST_UNPRICED,
     DiscoveryRun,
@@ -326,6 +327,41 @@ def _failed_document_observation(
     )
 
 
+def _document_observation_without_evidence(
+    run: DiscoveryRun,
+    query_id: str,
+    correlation_id: str,
+    doc: ObservationDocument,
+    *,
+    capability: str = EXPECTED_CAPABILITY,
+    external_source_id: str | None = None,
+) -> RetrievalObservation:
+    """Persist a native failure that intentionally retained no raw payload."""
+    if doc.status not in NATIVE_NO_EVIDENCE_STATUSES:
+        raise ValueError(f"status {doc.status!r} requires retained raw evidence")
+    return _new_observation(
+        run,
+        query_id,
+        correlation_id,
+        schema_version=doc.schema_version,
+        provider_variant=doc.provider_variant,
+        config_sha256=doc.config_sha256,
+        observation_id=doc.observation_id,
+        status=doc.status,
+        evidence_state="none",
+        capability=capability,
+        failure_reason=doc.failure_reason,
+        source_url=doc.source_url,
+        final_url=doc.final_url,
+        external_source_id=doc.external_source_id or external_source_id,
+        elapsed_ms=doc.elapsed_ms,
+        started_at=_parse_iso(doc.started_at),
+        completed_at=_parse_iso(doc.completed_at),
+        runtime=doc.runtime,
+        network=doc.network,
+    )
+
+
 def _unclassified_observation(
     run: DiscoveryRun,
     query_id: str,
@@ -388,6 +424,10 @@ def _outcome_to_row(
             outcome.doc,
             failure_class=outcome.failure_class,
             failure_reason=outcome.failure_reason or "raw evidence is unavailable",
+        )
+    if outcome.doc is not None and outcome.doc.status in NATIVE_NO_EVIDENCE_STATUSES:
+        return _document_observation_without_evidence(
+            run, query_id, correlation_id, outcome.doc
         )
     return _unclassified_observation(
         run,
@@ -595,6 +635,46 @@ def _evidence_failure_reason(error: BaseException) -> str:
     """Render storage failures without copying provider-controlled paths."""
     error_code = type(error).__name__
     return f"raw evidence could not be finalized ({error_code})"
+
+
+def _finalize_attempt_evidence(
+    outcome: _AttemptOutcome,
+    *,
+    workspace_id: uuid.UUID,
+    staging_root: Path,
+    output_root: Path,
+    query_id: str,
+    evidence_store: EvidenceStore,
+) -> _AttemptOutcome:
+    """Finalize declared evidence while preserving honest no-evidence failures."""
+    doc = outcome.doc
+    if doc is None:
+        return outcome
+    if doc.raw_artifact is None and doc.status in NATIVE_NO_EVIDENCE_STATUSES:
+        return outcome
+    try:
+        artifact = _raw_artifact_input(doc, staging_root, output_root, query_id)
+        bundle = evidence_store.finalize_bundle(workspace_id, [artifact])
+        if not evidence_store.verify_bundle(bundle):
+            raise EvidenceStoreError("finalized raw evidence failed verification")
+        return _AttemptOutcome(
+            evidence_directory=outcome.evidence_directory,
+            doc=doc,
+            bundle=bundle,
+            raw_artifact=_raw_artifact_metadata(bundle),
+        )
+    except (
+        ArtifactValidationError,
+        EvidenceStoreError,
+        OSError,
+        ValueError,
+    ) as error:
+        return _AttemptOutcome(
+            evidence_directory=outcome.evidence_directory,
+            doc=doc,
+            failure_class="evidence_unreadable",
+            failure_reason=_evidence_failure_reason(error),
+        )
 
 
 def _cleanup_staging_attempt(
@@ -869,37 +949,14 @@ async def _spawn_attempt(
             timeout_seconds=config.timeout_seconds,
         )
         outcome = _classify_result(result, output_root, config.timeout_seconds)
-        if outcome.doc is not None:
-            try:
-                artifact = _raw_artifact_input(
-                    outcome.doc, config.staging_root, output_root, query_id
-                )
-                bundle = config.evidence_store.finalize_bundle(
-                    claim.workspace_id, [artifact]
-                )
-                if not config.evidence_store.verify_bundle(bundle):
-                    raise EvidenceStoreError(
-                        "finalized raw evidence failed verification"
-                    )
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    bundle=bundle,
-                    raw_artifact=_raw_artifact_metadata(bundle),
-                )
-            except (
-                ArtifactValidationError,
-                EvidenceStoreError,
-                OSError,
-                ValueError,
-            ) as error:
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    failure_class="evidence_unreadable",
-                    failure_reason=_evidence_failure_reason(error),
-                )
-        return outcome
+        return _finalize_attempt_evidence(
+            outcome,
+            workspace_id=claim.workspace_id,
+            staging_root=config.staging_root,
+            output_root=output_root,
+            query_id=query_id,
+            evidence_store=config.evidence_store,
+        )
     finally:
         _cleanup_staging_attempt(config.staging_root, output_root, query_id)
 
