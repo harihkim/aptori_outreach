@@ -74,7 +74,8 @@ def run(runner: LLMTaskRunner, **kwargs: Any) -> Any:
 
 
 def test_suite_blocks_real_model_requests_by_default() -> None:
-    assert pydantic_ai_models.ALLOW_MODEL_REQUESTS is False
+    with pytest.raises(RuntimeError, match="Model requests are not allowed"):
+        pydantic_ai_models.check_allow_model_requests()
 
 
 def test_successful_run_records_versions_routing_usage_and_output_digest() -> None:
