@@ -23,15 +23,13 @@ from app.discovery.runner import (
     _AttemptOutcome,
     _classify_result,
     _cleanup_staging_attempt,
+    _document_observation_without_evidence,
     _ensure_bundle_row,
-    _evidence_failure_reason,
+    _finalize_attempt_evidence,
     _new_observation,
     _parse_iso,
-    _raw_artifact_input,
-    _raw_artifact_metadata,
 )
 from app.evidence.store import (
-    ArtifactValidationError,
     EvidenceStore,
     EvidenceStoreError,
     EvidenceStoreLimits,
@@ -200,40 +198,14 @@ async def _spawn(claim: _ThreadClaim, config: _ThreadConfig) -> _AttemptOutcome:
             config.timeout_seconds,
             expected_capability="thread_fetch",
         )
-        if outcome.doc is not None:
-            try:
-                artifact = _raw_artifact_input(
-                    outcome.doc,
-                    config.staging_root,
-                    output_root,
-                    claim.query_id,
-                )
-                bundle = config.evidence_store.finalize_bundle(
-                    claim.workspace_id, [artifact]
-                )
-                if not config.evidence_store.verify_bundle(bundle):
-                    raise EvidenceStoreError(
-                        "finalized raw evidence failed verification"
-                    )
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    bundle=bundle,
-                    raw_artifact=_raw_artifact_metadata(bundle),
-                )
-            except (
-                ArtifactValidationError,
-                EvidenceStoreError,
-                OSError,
-                ValueError,
-            ) as error:
-                outcome = _AttemptOutcome(
-                    evidence_directory=outcome.evidence_directory,
-                    doc=outcome.doc,
-                    failure_class="evidence_unreadable",
-                    failure_reason=_evidence_failure_reason(error),
-                )
-        return outcome
+        return _finalize_attempt_evidence(
+            outcome,
+            workspace_id=claim.workspace_id,
+            staging_root=config.staging_root,
+            output_root=output_root,
+            query_id=claim.query_id,
+            evidence_store=config.evidence_store,
+        )
     finally:
         _cleanup_staging_attempt(config.staging_root, output_root, claim.query_id)
 
@@ -269,6 +241,15 @@ def _row_from_outcome(
             runtime=doc.runtime,
             network=doc.network,
             raw_artifact=outcome.raw_artifact,
+        )
+    if doc is not None and outcome.failure_class is None:
+        return _document_observation_without_evidence(
+            run,
+            claim.query_id,
+            claim.correlation_id,
+            doc,
+            capability="thread_fetch",
+            external_source_id=claim.external_source_id,
         )
     return _new_observation(
         run,
