@@ -52,6 +52,20 @@ RETRIEVAL_OBSERVATION_STATUSES = (
     "runtime_verification_failed",
     "failed",
 )
+# Native provider outcomes that can honestly have no retained raw payload. Access
+# challenges are deliberately not stored, and failures can happen before a
+# response body exists. Successful/usable content outcomes remain evidence-bound.
+NATIVE_NO_EVIDENCE_STATUSES = (
+    "blocked",
+    "rate_limited",
+    "auth_required",
+    "forbidden",
+    "upstream_unavailable",
+    "parse_failed",
+    "transport_failed",
+    "runtime_verification_failed",
+    "failed",
+)
 # Canonical backend-classified failure taxonomy, persisted ONLY under
 # status='failed'; native document statuses keep failure_class NULL. The
 # database enforces this set via ck_retrieval_observations_failure_class_values
@@ -169,8 +183,9 @@ class RetrievalObservation(Base):
             "(evidence_state = 'legacy' AND evidence_bundle_id IS NULL "
             "AND evidence_directory IS NOT NULL) OR "
             "(evidence_state = 'none' AND evidence_bundle_id IS NULL "
-            "AND evidence_directory IS NULL AND status = 'failed' "
-            "AND failure_class IS NOT NULL)",
+            "AND evidence_directory IS NULL AND ("
+            "(status = 'failed' AND failure_class IS NOT NULL) OR "
+            f"(failure_class IS NULL AND {_in_values('status', NATIVE_NO_EVIDENCE_STATUSES)})))",
             name="evidence_reference_values",
         ),
         Index(
